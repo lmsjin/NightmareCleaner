@@ -1,0 +1,42 @@
+# ==========================================================================
+# 줄바꿈 정규화 + Unity 파일 유형 구분(텍스트=병합 가능 / 바이너리=병합 안 함)
+# ==========================================================================
+
+# 기본: 텍스트는 자동 정규화(운영체제 간 줄바꿈 차이 방지)
+* text=auto
+
+# ---- 코드 / Unity YAML 에셋 = 텍스트(병합 가능) ----
+*.cs         text diff=csharp
+*.meta       text
+*.unity      text
+*.asset      text
+*.prefab     text
+*.mat        text
+*.anim       text
+*.controller text
+*.physicMaterial text
+*.asmdef     text
+*.json       text
+*.md         text
+*.shader     text
+
+# ---- 바이너리 에셋(diff/merge 시도 금지) ----
+*.fbx  binary
+*.obj  binary
+*.blend binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.tga  binary
+*.psd  binary
+*.tif  binary
+*.wav  binary
+*.mp3  binary
+*.ogg  binary
+*.ttf  binary
+*.otf  binary
+*.dll  binary
+*.a    binary
+*.so   binary
+*.dylib binary
