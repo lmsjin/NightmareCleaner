@@ -160,17 +160,6 @@ public class MinimapController : MonoBehaviour
         if (ps != null) _playerTf = ps.transform;
         if (_playerTf == null)
             Debug.LogError("[MinimapController] PlayerStats를 찾지 못했습니다.");
-        HideSuctionRangeFromMinimap();
-    }
-
-    // 흡입 범위 부채꼴 메시를 미니맵 카메라에서 제외(레이어를 UI=5로 → 미니맵 컬링서 빠짐).
-    // 메인 게임 카메라는 UI 레이어도 렌더하므로 인게임에는 그대로 보인다.
-    void HideSuctionRangeFromMinimap()
-    {
-        var vis = FindFirstObjectByType<VacuumRangeVisualizer>();
-        if (vis == null) return;
-        var fan = vis.transform.Find("VacuumRangeVisual");
-        if (fan != null) fan.gameObject.layer = 5; // UI
     }
 
     void Update()
@@ -612,11 +601,21 @@ public class MinimapController : MonoBehaviour
     {
         if (_mapCam != null)  _mapCam.targetTexture  = null;
         if (_fullCam != null) _fullCam.targetTexture = null;
-        if (_mapRT != null)  { _mapRT.Release();  Destroy(_mapRT); }
-        if (_fullRT != null) { _fullRT.Release(); Destroy(_fullRT); }
+        ReleaseRenderTexture(ref _mapRT);
+        ReleaseRenderTexture(ref _fullRT);
 
         // 혹시 전체지도 연 채로 파괴되면 타임스케일 복원
         if (_mapOpen) Time.timeScale = _prevTimeScale;
+    }
+
+    // RenderTexture 해제 — 에디트 모드에선 Destroy가 안 되므로 DestroyImmediate로 분기.
+    void ReleaseRenderTexture(ref RenderTexture rt)
+    {
+        if (rt == null) return;
+        rt.Release();
+        if (Application.isPlaying) Destroy(rt);
+        else                       DestroyImmediate(rt);
+        rt = null;
     }
 
     // 가운데 플레이어 마커(삼각형 느낌의 작은 화살표) — 흰색
