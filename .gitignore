@@ -53,3 +53,6 @@ UpgradeLog*.XML
 # ---- OS ----
 .DS_Store
 Thumbs.db
+
+# MCP/디버그 스크린샷
+Assets/Screenshots/
