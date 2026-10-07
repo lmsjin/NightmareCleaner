@@ -103,6 +103,11 @@ GameObject:
   - component: {fileID: 8674785803682564278}
   - component: {fileID: 2701479936447799602}
   - component: {fileID: 823706993570566278}
+  - component: {fileID: 4486850919386780448}
+  - component: {fileID: 2185769073273647756}
+  - component: {fileID: 4919346956128735186}
+  - component: {fileID: 9065074140094196066}
+  - component: {fileID: 3564863348429592080}
   m_Layer: 0
   m_Name: NetworkPlayer
   m_TagString: Untagged
@@ -145,6 +150,11 @@ MonoBehaviour:
   NetworkedBehaviours:
   - {fileID: 2701479936447799602}
   - {fileID: 823706993570566278}
+  - {fileID: 4486850919386780448}
+  - {fileID: 2185769073273647756}
+  - {fileID: 4919346956128735186}
+  - {fileID: 9065074140094196066}
+  - {fileID: 3564863348429592080}
   ForceRemoteRenderTimeframe: 0
 --- !u!143 &8674785803682564278
 CharacterController:
@@ -170,7 +180,7 @@ CharacterController:
   m_StepOffset: 0.3
   m_SkinWidth: 0.08
   m_MinMoveDistance: 0.001
-  m_Center: {x: 0, y: 0, z: 0}
+  m_Center: {x: 0, y: 1, z: 0}
 --- !u!114 &2701479936447799602
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -205,3 +215,81 @@ MonoBehaviour:
   bodyRenderer: {fileID: 2643291908227750129}
   localColor: {r: 0.2, g: 0.9, b: 0.3, a: 1}
   remoteColor: {r: 1, g: 0.5, b: 0.1, a: 1}
+--- !u!114 &4486850919386780448
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4885699156050091369}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5882510487809444caf414b39fba25cf, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::NetworkPlayerMovement
+  moveSpeed: 5
+  turnSpeed: 720
+--- !u!114 &2185769073273647756
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4885699156050091369}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d8e2080617064f34b8492f360514cfa2, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::LocalCameraBinder
+--- !u!114 &4919346956128735186
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4885699156050091369}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4b9c29e040afe8f4c9d6d1aebeaf20d6, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::NetworkShooter
+  damage: 10
+  range: 12
+  fireInterval: 0.15
+  muzzleHeight: 1
+  beamRadius: 0.3
+  ghostRadius: 0.5
+--- !u!114 &9065074140094196066
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4885699156050091369}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 83f12ed34204c584d900d8d75b3d23a7, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::NetworkPlayerHealth
+  maxHp: 100
+  invincibleSeconds: 0.5
+  reviveHp: 40
+  reviveProtectSeconds: 2
+  _Hp: 0
+  _MaxHp: 0
+  _IsDown:
+    _value: 0
+--- !u!114 &3564863348429592080
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4885699156050091369}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 178213c2f60a7834087895cece4bf7a8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::NetworkPlayerInteract
+  _IsHoldingInteract:
+    _value: 0
