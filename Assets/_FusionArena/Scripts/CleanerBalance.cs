@@ -63,6 +63,12 @@ public class CleanerBalance : ScriptableObject
     [Tooltip("두 명이 함께 E를 유지해야 하는 시간(초)")]
     public float furnitureHoldSeconds = 2.0f;
 
+    [Header("전투방")]
+    [Tooltip("유령이 나타나기 전 출현 지점에 예고를 보여주는 시간(초)")]
+    public float spawnWarningSeconds = 1.5f;
+    [Tooltip("한 차수를 다 잡은 뒤 다음 차수가 시작되기까지의 간격(초)")]
+    public float waveGapSeconds = 2.0f;
+
     [Header("게임 흐름")]
     [Tooltip("제한 시간(초). 기획서 10분")]
     public float missionSeconds = 600f;
