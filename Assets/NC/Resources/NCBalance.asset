@@ -1,0 +1,50 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 41b4be81fe79ece4b85ffeb6d6fd396c, type: 3}
+  m_Name: NCBalance
+  m_EditorClassIdentifier: Assembly-CSharp::NCBalance
+  soloTest: 1
+  missionSeconds: 600
+  startZoneRadius: 2.5
+  messageSeconds: 2
+  playerMaxHp: 100
+  playerMoveSpeed: 4.5
+  hitInvincibleSeconds: 0.5
+  reviveHp: 40
+  reviveProtectSeconds: 2
+  reviveRange: 1.5
+  reviveHoldSeconds: 3
+  shotDamage: 20
+  fireInterval: 0.25
+  magazineSize: 12
+  reloadSeconds: 1.8
+  shotRange: 9
+  autoReloadWhenEmpty: 0
+  beamRadius: 0.3
+  basicHp: 60
+  basicMoveSpeed: 2.5
+  basicDamage: 15
+  basicTelegraphSeconds: 0.6
+  basicAttackInterval: 1.2
+  fastHp: 40
+  fastMoveSpeed: 4.8
+  fastDamage: 10
+  fastTelegraphSeconds: 0.5
+  fastAttackInterval: 1.4
+  ghostAttackRange: 1.1
+  ghostSpawnSafeSeconds: 0.7
+  ghostRadius: 0.45
+  dummyRange: 2
+  dummyHoldSeconds: 2
+  spawnWarningSeconds: 1.5
+  waveGapSeconds: 1
+  recordKey: NC_BestRecord_v1
