@@ -26,6 +26,8 @@ public class NetworkFurniture : NetworkBehaviour
     [SerializeField] private Transform restoredPose;
     [Tooltip("정리 연출 속도. 기획서: 복구와 첫 출현 예고가 1.5초 안에 겹쳐 보이도록")]
     [SerializeField] private float restoreLerpSpeed = 4.0f;
+    [Tooltip("UI 기획서: 정리가 끝나면 잡동사니 더미가 사라진다. 끄면 두 자세 사이 보간 연출을 쓴다")]
+    [SerializeField] private bool hideWhenRestored = true;
 
     [Header("테스트")]
     [Tooltip("시작에 필요한 인원. 기획서는 2인 고정. 혼자 테스트할 때만 1로 낮춘다")]
@@ -43,6 +45,9 @@ public class NetworkFurniture : NetworkBehaviour
 
     /// <summary>지금 E를 누르고 있는 인원(안내 문구용).</summary>
     [Networked] private int HoldingCount { get; set; }
+
+    // 정리를 시작할 수 없는 이유(안내 문구용). 0=없음, 1=의뢰 시작 전, 2=다른 방 전투 중
+    [Networked] private int BlockReason { get; set; }
 
     /// <summary>진행 비율(0~1). UI 진행 바에 쓴다.</summary>
     public float ProgressRatio => holdSeconds > 0f ? Mathf.Clamp01(Progress / holdSeconds) : 0f;
@@ -66,6 +71,16 @@ public class NetworkFurniture : NetworkBehaviour
         // 판정은 Host만 한다. 이미 정리된 가구는 다시 시작하지 않는다(기획서 13장 필수 예외).
         if (Object.HasStateAuthority == false || IsRestored)
         {
+            return;
+        }
+
+        // UI 기획서: 의뢰 시작 전에는 정리 불가, 동시에 전투하는 방은 1개뿐.
+        BlockReason = FindBlockReason();
+
+        if (BlockReason != 0)
+        {
+            Progress = 0f;
+            HoldingCount = 0;
             return;
         }
 
@@ -121,6 +136,44 @@ public class NetworkFurniture : NetworkBehaviour
         }
     }
 
+    /// <summary>
+    /// 정리를 시작할 수 없는 이유를 찾는다. 게임 흐름·전투방이 씬에 없으면 제한하지 않는다(단독 테스트용).
+    /// </summary>
+    private int FindBlockReason()
+    {
+        NetworkGameFlow flow = FindFirstObjectByType<NetworkGameFlow>();
+        if (flow != null && flow.Object != null && flow.Object.IsValid && flow.IsMissionRunning == false)
+        {
+            return 1;
+        }
+
+        foreach (NetworkCombatRoom room in FindObjectsByType<NetworkCombatRoom>(FindObjectsSortMode.None))
+        {
+            if (room.Furniture != this && room.Object != null && room.Object.IsValid && room.State == RoomState.Fighting)
+            {
+                return 2;
+            }
+        }
+
+        return 0;
+    }
+
+    /// <summary>
+    /// 재시작용. 가구를 어질러진 상태로 되돌린다. **Host에서만 호출.**
+    /// </summary>
+    public void ServerReset()
+    {
+        if (Object.HasStateAuthority == false)
+        {
+            return;
+        }
+
+        Progress = 0f;
+        IsRestored = false;
+        HoldingCount = 0;
+        BlockReason = 0;
+    }
+
     private bool IsWithinRange(Vector3 position)
     {
         Vector3 to = position - transform.position;
@@ -132,7 +185,23 @@ public class NetworkFurniture : NetworkBehaviour
 
     private void Update()
     {
-        if (visual == null || messyPose == null || restoredPose == null || Object == null || Object.IsValid == false)
+        if (visual == null || Object == null || Object.IsValid == false)
+        {
+            return;
+        }
+
+        // 정리 완료 → 더미를 숨긴다. 재시작으로 초기화되면 다시 보인다.
+        if (hideWhenRestored)
+        {
+            bool show = IsRestored == false;
+            if (visual.gameObject.activeSelf != show)
+            {
+                visual.gameObject.SetActive(show);
+            }
+            return;
+        }
+
+        if (messyPose == null || restoredPose == null)
         {
             return;
         }
@@ -178,9 +247,18 @@ public class NetworkFurniture : NetworkBehaviour
 
         string message;
 
-        if (Progress > 0f)
+        // UI 기획서 07장 CTX-01~03 문구
+        if (BlockReason == 1)
         {
-            message = $"함께 정리 중... {Mathf.RoundToInt(ProgressRatio * 100f)}%";
+            message = "동료와 중앙홀로 이동해 의뢰를 시작하세요";
+        }
+        else if (BlockReason == 2)
+        {
+            message = "다른 방의 전투가 끝나야 정리할 수 있습니다";
+        }
+        else if (Progress > 0f)
+        {
+            message = $"정리 중... {Mathf.RoundToInt(ProgressRatio * 100f)}%";
         }
         else if (HoldingCount > 0)
         {
@@ -188,7 +266,7 @@ public class NetworkFurniture : NetworkBehaviour
         }
         else
         {
-            message = "[E] 함께 정리";
+            message = "E 길게 눌러 함께 치우기";
         }
 
         GUI.Label(new Rect(Screen.width * 0.5f - 120f, Screen.height * 0.7f, 240f, 30f), message);

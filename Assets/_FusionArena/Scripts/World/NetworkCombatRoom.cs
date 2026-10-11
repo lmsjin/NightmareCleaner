@@ -82,8 +82,17 @@ public class NetworkCombatRoom : NetworkBehaviour
     // "방 정리 완료!" 문구를 잠깐 보여주는 시간
     [Networked] private TickTimer ClearedBannerTimer { get; set; }
 
+    // UI 기획서: 차수는 출현 예고 1.5초 동안만 "유령 출현 · N차"로 알린다.
+    [Networked] private TickTimer WaveBannerTimer { get; set; }
+
+    /// <summary>게임이 끝나 이 방의 진행을 멈춘 상태인지(승리/실패 후).</summary>
+    [Networked] public NetworkBool IsHalted { get; set; }
+
     /// <summary>방 완료 여부. 봉쇄 해제·과충전 지급·승리 판정이 이 값을 본다.</summary>
     public bool IsCleared => State == RoomState.Cleared;
+
+    /// <summary>이 방의 공동 정리 더미. 가구가 "자기 방이 아닌 전투"를 구분할 때 쓴다.</summary>
+    public NetworkFurniture Furniture => furniture;
 
     // ───────── Host 전용 (네트워크로 보낼 필요 없음) ─────────
 
@@ -114,8 +123,8 @@ public class NetworkCombatRoom : NetworkBehaviour
 
     public override void FixedUpdateNetwork()
     {
-        // 판정은 Host만 한다.
-        if (Object.HasStateAuthority == false)
+        // 판정은 Host만 한다. 게임이 끝나 멈춘 방은 아무것도 하지 않는다.
+        if (Object.HasStateAuthority == false || IsHalted)
         {
             return;
         }
@@ -129,6 +138,60 @@ public class NetworkCombatRoom : NetworkBehaviour
             case RoomState.Fighting:
                 TickFighting();
                 break;
+        }
+    }
+
+    // ───────── 게임 흐름(NetworkGameFlow)이 부르는 제어 ─────────
+
+    /// <summary>
+    /// 게임 종료(승리/실패) 시 호출. 이 방의 유령·예고를 없애고 진행을 멈춘다. **Host에서만 호출.**
+    /// </summary>
+    public void ServerHalt()
+    {
+        if (Object.HasStateAuthority == false)
+        {
+            return;
+        }
+
+        foreach (NetworkGhost ghost in _ghosts)
+        {
+            if (ghost != null && ghost.Object != null && ghost.Object.IsValid)
+            {
+                Runner.Despawn(ghost.Object);
+            }
+        }
+
+        _ghosts.Clear();
+        _pending.Clear();
+        IsHalted = true;
+    }
+
+    /// <summary>
+    /// 재시작 시 호출. 방과 가구를 처음 상태(정리 전)로 되돌린다. **Host에서만 호출.**
+    /// </summary>
+    public void ServerReset()
+    {
+        if (Object.HasStateAuthority == false)
+        {
+            return;
+        }
+
+        ServerHalt();
+
+        State = RoomState.Idle;
+        WaveIndex = 0;
+        RemainingInWave = 0;
+        WaveGapTimer = TickTimer.None;
+        ClearedBannerTimer = TickTimer.None;
+        WaveBannerTimer = TickTimer.None;
+        _basicLeft = 0;
+        _fastLeft = 0;
+        _spawnBroken = false;
+        IsHalted = false;
+
+        if (furniture != null)
+        {
+            furniture.ServerReset();
         }
     }
 
@@ -214,6 +277,7 @@ public class NetworkCombatRoom : NetworkBehaviour
         }
 
         WaveIndex = index;
+        WaveBannerTimer = TickTimer.CreateFromSeconds(Runner, spawnWarningSeconds);
         _basicLeft = waves[index].basicCount;
         _fastLeft = waves[index].fastCount;
         RemainingInWave = _basicLeft + _fastLeft;
@@ -227,6 +291,10 @@ public class NetworkCombatRoom : NetworkBehaviour
         RemainingInWave = 0;
         ClearedBannerTimer = TickTimer.CreateFromSeconds(Runner, 3.0f);
 
+        // UI 기획서 17장: 마지막 처치와 전멸이 겹치면 실패다.
+        // 전원이 다운된 상태라면 부활시키지 않고, 게임 흐름이 실패로 판정하게 둔다.
+        bool anyoneAlive = IsAnyPlayerAlive();
+
         // 기획서 7장: 방을 완료하면 다운된 플레이어가 체력 40으로 일어난다.
         foreach (PlayerRef player in Runner.ActivePlayers)
         {
@@ -236,13 +304,39 @@ public class NetworkCombatRoom : NetworkBehaviour
             }
 
             NetworkPlayerHealth health = playerObject.GetComponent<NetworkPlayerHealth>();
-            if (health != null && health.IsDown)
+            if (anyoneAlive && health != null && health.IsDown)
             {
                 health.Revive();
+            }
+
+            // UI 기획서 12장: 방 완료 시 두 명의 탄창을 가득 채운다(생존자 체력 회복은 없음).
+            NetworkShooter shooter = playerObject.GetComponent<NetworkShooter>();
+            if (shooter != null)
+            {
+                shooter.ServerRefillMagazine();
             }
         }
 
         Debug.Log($"[NetworkCombatRoom] {name}: 방 정리 완료");
+    }
+
+    private bool IsAnyPlayerAlive()
+    {
+        foreach (PlayerRef player in Runner.ActivePlayers)
+        {
+            if (Runner.TryGetPlayerObject(player, out NetworkObject playerObject) == false)
+            {
+                continue;
+            }
+
+            NetworkPlayerHealth health = playerObject.GetComponent<NetworkPlayerHealth>();
+            if (health == null || health.IsDown == false)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // ───────── 출현 ─────────
@@ -440,29 +534,29 @@ public class NetworkCombatRoom : NetworkBehaviour
 
     private void OnGUI()
     {
-        if (Object == null || Object.IsValid == false || Runner == null)
+        // 게임이 끝나 멈춘 방은 결과 화면과 겹치지 않도록 표시하지 않는다.
+        if (Object == null || Object.IsValid == false || Runner == null || IsHalted)
         {
             return;
         }
 
         string message = null;
 
-        if (State == RoomState.Fighting)
+        // UI 기획서 02장: 차수·남은 수는 상시 표시하지 않는다. 예고 순간과 완료 순간에만 잠깐 알린다.
+        if (State == RoomState.Fighting && WaveBannerTimer.IsRunning && WaveBannerTimer.Expired(Runner) == false)
         {
-            int total = waves != null ? waves.Length : 0;
-
-            message = WaveGapTimer.IsRunning
-                ? $"{WaveIndex + 1}차수 완료! 다음 차수 준비..."
-                : $"{WaveIndex + 1} / {total}차수 · 남은 유령 {RemainingInWave}";
+            message = $"유령 출현 · {WaveIndex + 1}차";
         }
         else if (State == RoomState.Cleared && ClearedBannerTimer.IsRunning && ClearedBannerTimer.Expired(Runner) == false)
         {
-            message = "방 정리 완료!";
+            // 최종 방이면 게임이 끝나 방이 멈추므로(IsHalted) 이 문구는 자동으로 생략된다.
+            message = "전투방 소탕 완료";
         }
 
         if (message != null)
         {
-            GUI.Label(new Rect(Screen.width * 0.5f - 140f, 20f, 280f, 30f), message);
+            // MSG: 중앙 HUD(남은 시간·소탕 완료) 아래
+            GUI.Label(new Rect(Screen.width * 0.5f - 140f, 70f, 280f, 30f), message);
         }
     }
 }

@@ -111,6 +111,21 @@ public class NetworkPlayerHealth : NetworkBehaviour
     }
 
     /// <summary>
+    /// 재시작용. 체력을 가득 채우고 다운·무적 상태를 지운다. **Host에서만 호출.**
+    /// </summary>
+    public void ServerResetFull()
+    {
+        if (Object.HasStateAuthority == false)
+        {
+            return;
+        }
+
+        Hp = MaxHp;
+        IsDown = false;
+        InvincibleTimer = TickTimer.None;
+    }
+
+    /// <summary>
     /// 내 화면에만 내 체력을 임시로 표시한다(정식 HUD는 UI 담당이 제작).
     /// </summary>
     private void OnGUI()
@@ -120,10 +135,11 @@ public class NetworkPlayerHealth : NetworkBehaviour
             return;
         }
 
+        // UI 기획서 HUD-03: 왼쪽 하단. (왼쪽 상단은 비워 둔다)
         string text = IsDown
-            ? "DOWN - 동료의 구조가 필요합니다"
-            : $"HP {Hp} / {MaxHp}";
+            ? $"체력 0 / {MaxHp} · 다운 · 동료의 구조를 기다리세요"
+            : $"체력 {Hp} / {MaxHp}";
 
-        GUI.Label(new Rect(10, 10, 320, 24), text);
+        GUI.Label(new Rect(16f, Screen.height - 40f, 360f, 24f), text);
     }
 }

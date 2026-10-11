@@ -32,6 +32,8 @@ public class CleanerBalance : ScriptableObject
     public float fireInterval = 0.25f;
     public int magazineSize = 12;
     public float reloadSeconds = 1.8f;
+    [Tooltip("탄창이 비면 자동으로 재장전할지. 원 기획서는 자동, UI 기획서는 '규칙 확정 전 추가하지 않는다' → 기획 확인 필요")]
+    public bool autoReloadWhenEmpty = true;
     [Tooltip("최대 사거리(m)")]
     public float shotRange = 9f;
 

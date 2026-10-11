@@ -1639,6 +1639,7 @@ MonoBehaviour:
   messyPose: {fileID: 1551778090}
   restoredPose: {fileID: 758252672}
   restoreLerpSpeed: 4
+  hideWhenRestored: 1
   requiredPlayers: 1
   interactRange: 2
   holdSeconds: 2
@@ -6921,6 +6922,87 @@ Transform:
   m_Children: []
   m_Father: {fileID: 1883452665}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &988174324
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 988174326}
+  - component: {fileID: 988174328}
+  - component: {fileID: 988174327}
+  m_Layer: 0
+  m_Name: GameFlow
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &988174326
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 988174324}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &988174327
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 988174324}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f62b242e311f0f24598856a73c909e9d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::NetworkGameFlow
+  requiredPlayers: 2
+  startZone: {fileID: 1452519588}
+  startZoneRadius: 3
+  bestRecordKey: NC_Best_v1
+  playerStartPoints:
+  - {fileID: 1345231005}
+  - {fileID: 958631861}
+  missionSeconds: 600
+  _Phase: 0
+  _Reason: 0
+  _ClearedRooms: 0
+  _TotalRooms: 0
+  _ElapsedCentisec: 0
+  _TeamDownCount: 0
+  _BestCentisec: 0
+  _IsNewRecord:
+    _value: 0
+--- !u!114 &988174328
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 988174324}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: -1552182283, guid: e725a070cec140c4caffb81624c8c787, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Fusion.Runtime.dll::Fusion.NetworkObject
+  SortKey: 140985818
+  ObjectInterest: 1
+  Flags: 262145
+  NestedObjects: []
+  NetworkedBehaviours:
+  - {fileID: 988174327}
+  ForceRemoteRenderTimeframe: 0
 --- !u!1 &996718443
 GameObject:
   m_ObjectHideFlags: 0
@@ -9723,6 +9805,37 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1452519587
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1452519588}
+  m_Layer: 0
+  m_Name: StartZone
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1452519588
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1452519587}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 3.79, y: 0.38, z: 12.29}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1482383639
 GameObject:
   m_ObjectHideFlags: 0
@@ -10134,6 +10247,8 @@ MonoBehaviour:
   _State: 0
   _WaveIndex: 0
   _RemainingInWave: 0
+  _IsHalted:
+    _value: 0
 --- !u!114 &1493572881
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -14976,3 +15091,5 @@ SceneRoots:
   - {fileID: 693379486}
   - {fileID: 292054747}
   - {fileID: 1493572882}
+  - {fileID: 988174326}
+  - {fileID: 1452519588}

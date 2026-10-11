@@ -33,6 +33,9 @@ public class NetworkShooter : NetworkBehaviour
     private float reloadSeconds = 1.8f;  // 재장전 시간(초)
 
     [SerializeField]
+    private bool autoReloadWhenEmpty = true; // 탄창이 비면 자동 재장전(기획 확인 필요)
+
+    [SerializeField]
     private float muzzleHeight = 1.0f;   // 총구 높이. 조준 평면 높이와 맞춰야 선이 수평이 된다.
 
     [Header("명중 판정 두께")]
@@ -64,6 +67,14 @@ public class NetworkShooter : NetworkBehaviour
     /// <summary>탄창 크기(HUD 표시용).</summary>
     public int MagazineSize => magazineSize;
 
+    /// <summary>재장전 완료까지 남은 시간(초). 재장전 중이 아니면 0. HUD-05 진행 바용.</summary>
+    public float ReloadRemainingSeconds => IsReloading ? (ReloadTimer.RemainingTime(Runner) ?? 0f) : 0f;
+
+    /// <summary>재장전 진행 비율(0~1). 재장전 중이 아니면 0.</summary>
+    public float ReloadRatio => IsReloading && reloadSeconds > 0f
+        ? Mathf.Clamp01(1f - ReloadRemainingSeconds / reloadSeconds)
+        : 0f;
+
     // 다운 상태 확인용
     private NetworkPlayerHealth _health;
 
@@ -85,6 +96,7 @@ public class NetworkShooter : NetworkBehaviour
             fireInterval = balance.fireInterval;
             magazineSize = balance.magazineSize;
             reloadSeconds = balance.reloadSeconds;
+            autoReloadWhenEmpty = balance.autoReloadWhenEmpty;
         }
 
         // 처음엔 탄창이 가득 찬 상태로 시작한다. 값은 Host만 정한다.
@@ -119,11 +131,11 @@ public class NetworkShooter : NetworkBehaviour
             return;
         }
 
-        // ③ 탄창이 비어 있으면 자동 재장전(구조 직후처럼 0발로 남은 경우 포함).
+        // ③ 탄창이 비어 있으면 자동 재장전(설정이 켜져 있을 때, 구조 직후처럼 0발로 남은 경우 포함).
         //    R을 누르면 탄이 남아 있어도 재장전한다.
         if (IsReloading == false)
         {
-            bool empty = Ammo <= 0;
+            bool empty = autoReloadWhenEmpty && Ammo <= 0;
             bool manual = data.Reload && Ammo < magazineSize;
 
             if (empty || manual)
@@ -132,8 +144,8 @@ public class NetworkShooter : NetworkBehaviour
             }
         }
 
-        // 좌클릭을 누르지 않았거나 재장전 중이면 발사하지 않는다.
-        if (data.Fire == false || IsReloading)
+        // 좌클릭을 누르지 않았거나, 재장전 중이거나, 탄이 없으면 발사하지 않는다.
+        if (data.Fire == false || IsReloading || Ammo <= 0)
         {
             return;
         }
@@ -148,8 +160,8 @@ public class NetworkShooter : NetworkBehaviour
         FireCooldown = TickTimer.CreateFromSeconds(Runner, fireInterval);
         Ammo--;
 
-        // 마지막 탄을 쏘면 바로 자동 재장전을 시작한다.
-        if (Ammo <= 0)
+        // 마지막 탄을 쏘면 바로 자동 재장전을 시작한다(설정이 켜져 있을 때).
+        if (Ammo <= 0 && autoReloadWhenEmpty)
         {
             StartReload();
         }
@@ -339,10 +351,11 @@ public class NetworkShooter : NetworkBehaviour
             return;
         }
 
+        // UI 기획서 HUD-05: 오른쪽 하단. (왼쪽 상단은 비워 둔다)
         string text = IsReloading
-            ? "재장전 중..."
-            : $"탄창 {Ammo} / {magazineSize}";
+            ? $"재장전 중... {Mathf.RoundToInt(ReloadRatio * 100f)}%"
+            : $"{Ammo} / {magazineSize} · R 재장전";
 
-        GUI.Label(new Rect(10, 34, 320, 24), text);
+        GUI.Label(new Rect(Screen.width - 230f, Screen.height - 40f, 220f, 24f), text);
     }
 }
