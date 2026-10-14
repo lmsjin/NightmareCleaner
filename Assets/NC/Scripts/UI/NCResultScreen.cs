@@ -73,7 +73,7 @@ public class NCResultScreen
         Button leave = NCUiKit.NewButton("Leave", panel, "나가기", false, () => NCLauncher.Instance?.Leave());
         NCUiKit.Place((RectTransform)leave.transform, new Vector2(0.5f, 0f), new Vector2(140f, 40f), new Vector2(250f, 68f));
 
-        _waiting = NCUiKit.NewText("Waiting", panel, "호스트가 재도전을 선택하기를 기다리는 중...", 20f, NCStyle.TextDim);
+        _waiting = NCUiKit.NewText("Waiting", panel, "호스트가 재도전을 선택하면 대기실로 돌아갑니다", 20f, NCStyle.TextDim);
         NCUiKit.Place(_waiting.rectTransform, new Vector2(0.5f, 0f), new Vector2(-140f, 58f), new Vector2(300f, 30f));
         _waiting.textWrappingMode = TextWrappingModes.Normal;
         _waiting.rectTransform.sizeDelta = new Vector2(260f, 60f);

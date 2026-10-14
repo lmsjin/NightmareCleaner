@@ -292,6 +292,15 @@ public class NCLauncher : MonoBehaviour
     {
         NCInput data = new NCInput();
 
+        // 메뉴·팝업이 열려 있으면 내 게임 입력만 막는다(시간과 동료는 계속 진행).
+        // 빈 입력을 보내므로 Host 쪽에서 E 유지가 풀려 진행 중이던 정리·구조가 취소된다.
+        if (NCUi.InputBlocked)
+        {
+            data.AimPoint = _lastAim;
+            input.Set(data);
+            return;
+        }
+
         Keyboard keyboard = Keyboard.current;
         Mouse mouse = Mouse.current;
 

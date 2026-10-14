@@ -5,6 +5,7 @@ using UnityEngine;
 /// <summary>한 판의 진행 단계.</summary>
 public enum NCPhase
 {
+    Lobby,    // 대기실 — 1P·2P 준비 후 호스트가 시작. 행동 불가
     Entrance, // 저택 입구 — 두 명이 중앙홀 시작 영역에 모이길 기다림. 시간 정지
     Playing,  // 의뢰 진행 — 시간 흐름
     Victory,  // 의뢰 완료
@@ -22,7 +23,7 @@ public enum NCDefeatCause
 /// <summary>
 /// 한 판(의뢰)의 진행을 확정하는 호스트 관리자. 씬에 하나 배치하는 NetworkObject다.
 ///
-///  입구 → (두 명이 시작 영역에) → 진행(10분) → 성공/실패 → [재도전] → 입구
+///  대기실(준비 → 호스트 시작) → 입구 → (두 명이 시작 영역에) → 진행(10분) → 성공/실패 → [재도전] → 대기실
 ///
 /// 판정 순서(UI 기획서 17장): 전원 다운 → 모든 전투방 소탕(성공) → 시간 만료.
 /// 마지막 처치와 전멸이 겹치면 실패, 마지막 처치와 시간 만료가 겹치면 성공이다.
@@ -56,6 +57,9 @@ public class NCSession : NetworkBehaviour
     [Networked] public int BestCentisec { get; set; }
     [Networked] public NetworkBool IsNewRecord { get; set; }
 
+    /// <summary>게임 중 동료가 나가 대기실로 돌아온 횟수(대기실 안내용).</summary>
+    [Networked] public int PartnerLeftCount { get; set; }
+
     public bool IsMissionRunning => Phase == NCPhase.Playing;
     public bool IsFinished => Phase == NCPhase.Victory || Phase == NCPhase.Defeat;
     public Vector3 StartZonePosition => startZone != null ? startZone.position : Vector3.zero;
@@ -69,7 +73,8 @@ public class NCSession : NetworkBehaviour
 
             switch (Phase)
             {
-                case NCPhase.Entrance:
+                case NCPhase.Lobby:
+            case NCPhase.Entrance:
                     return balance.missionSeconds;
                 case NCPhase.Playing:
                     return Mathf.Max(0f, MissionTimer.RemainingTime(Runner) ?? 0f);
@@ -83,6 +88,8 @@ public class NCSession : NetworkBehaviour
 
     private readonly Dictionary<PlayerRef, bool> _wasDown = new Dictionary<PlayerRef, bool>();
     private bool _retryRequested;
+    private bool _startRequested;
+    private int _lastPlayerCount;
 
     public override void Spawned()
     {
@@ -90,7 +97,7 @@ public class NCSession : NetworkBehaviour
 
         if (Object.HasStateAuthority)
         {
-            Phase = NCPhase.Entrance;
+            Phase = NCPhase.Lobby;
             TotalRooms = NCCombatRoom.All.Count;
             BestCentisec = PlayerPrefs.GetInt(NCBalance.Get.recordKey, 0);
         }
@@ -113,6 +120,34 @@ public class NCSession : NetworkBehaviour
         }
     }
 
+    /// <summary>대기실의 [게임 시작]. 호스트만 의미가 있다(다음 Tick에 조건을 검사해 한 번만 수락).</summary>
+    public void RequestStart()
+    {
+        if (Object != null && Object.HasStateAuthority && Phase == NCPhase.Lobby)
+        {
+            _startRequested = true;
+        }
+    }
+
+    /// <summary>대기실에서 게임을 시작할 수 있는지(필요 인원이 모두 준비).</summary>
+    public bool CanStart
+    {
+        get
+        {
+            int ready = 0;
+            foreach (NCPlayer player in NCPlayer.All)
+            {
+                if (player.Ready)
+                {
+                    ready++;
+                }
+            }
+
+            int count = NCPlayer.All.Count;
+            return Phase == NCPhase.Lobby && count >= NCBalance.Get.RequiredPlayers && ready == count;
+        }
+    }
+
     public override void FixedUpdateNetwork()
     {
         if (Object.HasStateAuthority == false)
@@ -131,8 +166,37 @@ public class NCSession : NetworkBehaviour
         PlayerCount = count;
         PlayersInZone = inZone;
 
+        // 게임 중 동료가 나가면 의뢰를 중단하고 대기실로 돌아간다.
+        if (Phase != NCPhase.Lobby && count < _lastPlayerCount)
+        {
+            _lastPlayerCount = count;
+            PartnerLeftCount++;
+            ResetMission();
+            return;
+        }
+
+        _lastPlayerCount = count;
+
         switch (Phase)
         {
+            case NCPhase.Lobby:
+                if (_startRequested)
+                {
+                    _startRequested = false;
+
+                    if (CanStart)
+                    {
+                        foreach (NCPlayer player in NCPlayer.All)
+                        {
+                            player.Ready = false;
+                        }
+
+                        Phase = NCPhase.Entrance;
+                        Debug.Log("[NCSession] 대기실 → 저택 입구");
+                    }
+                }
+                break;
+
             case NCPhase.Entrance:
                 if (count >= NCBalance.Get.RequiredPlayers && inZone == count)
                 {
@@ -201,7 +265,7 @@ public class NCSession : NetworkBehaviour
         Debug.Log($"[NCSession] 결과: {result} {cause} {ElapsedCentisec / 100f:0.00}초 다운 {TeamDownCount}회");
     }
 
-    /// <summary>재도전: 유령 제거 → 방 초기화 → 플레이어 풀피·탄창·입구 위치 → 입구 단계.</summary>
+    /// <summary>재도전·동료 이탈: 유령 제거 → 방 초기화 → 플레이어 풀피·탄창·입구 위치·준비 해제 → 대기실.</summary>
     private void ResetMission()
     {
         NCGhost.ServerDespawnAll(Runner);
@@ -215,6 +279,7 @@ public class NCSession : NetworkBehaviour
         {
             player.Health.ServerResetFull();
             player.Gun.ServerRefill();
+            player.Ready = false;
 
             Transform point = NCLauncher.Instance != null ? NCLauncher.Instance.GetEntrySpawn(player.Slot) : null;
             if (point != null)
@@ -223,7 +288,7 @@ public class NCSession : NetworkBehaviour
             }
         }
 
-        Phase = NCPhase.Entrance;
+        Phase = NCPhase.Lobby;
         Cause = NCDefeatCause.None;
         MissionTimer = TickTimer.None;
         ClearedRooms = 0;
@@ -231,7 +296,8 @@ public class NCSession : NetworkBehaviour
         TeamDownCount = 0;
         IsNewRecord = false;
         _wasDown.Clear();
-        Debug.Log("[NCSession] 재도전 — 입구로");
+        _startRequested = false;
+        Debug.Log("[NCSession] 대기실로");
     }
 
     private void CountPlayers(out int count, out int inZone, out bool allDown)

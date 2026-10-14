@@ -42,6 +42,9 @@ public class NCPlayer : NetworkBehaviour
     [Networked] public NetworkBool IsMoving { get; set; }
     [Networked] public NetworkBool IsFiring { get; set; }
 
+    /// <summary>대기실 준비 상태(각자 요청, 호스트 확정).</summary>
+    [Networked] public NetworkBool Ready { get; set; }
+
     /// <summary>슬롯 색이 칠해지는 몸통 렌더러(피격 깜빡임에도 쓴다).</summary>
     public Renderer BodyRenderer => bodyRenderer;
 
@@ -62,7 +65,7 @@ public class NCPlayer : NetworkBehaviour
             }
 
             NCSession session = NCSession.Instance;
-            return session == null || session.IsFinished == false;
+            return session == null || (session.IsFinished == false && session.Phase != NCPhase.Lobby);
         }
     }
 
@@ -138,6 +141,17 @@ public class NCPlayer : NetworkBehaviour
 
         Quaternion target = Quaternion.LookRotation(look.normalized, Vector3.up);
         transform.rotation = Quaternion.RotateTowards(transform.rotation, target, _turnSpeed * Runner.DeltaTime);
+    }
+
+    /// <summary>대기실에서 내 준비 상태를 바꿔 달라고 호스트에게 요청한다(내 플레이어만 보낼 수 있다).</summary>
+    [Rpc(RpcSources.InputAuthority, RpcTargets.StateAuthority)]
+    public void RpcSetReady(NetworkBool ready)
+    {
+        NCSession session = NCSession.Instance;
+        if (session != null && session.Phase == NCPhase.Lobby)
+        {
+            Ready = ready;
+        }
     }
 
     /// <summary>재도전 때 입구로 옮긴다. Host의 Tick 안에서만 호출한다.</summary>

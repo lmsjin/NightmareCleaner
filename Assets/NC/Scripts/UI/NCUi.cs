@@ -1,9 +1,10 @@
 using TMPro;
 using UnityEngine;
+using UnityEngine.InputSystem;
 using UnityEngine.UI;
 
 /// <summary>
-/// 화면 전체를 코드로 만들고 상태에 따라 전환한다: 접속 → 인게임 HUD → 결과.
+/// 화면 전체를 코드로 만들고 상태에 따라 전환한다: 접속 → 대기실 → 인게임 HUD(+Esc 메뉴) → 결과.
 /// 화면은 게임 상태를 바꾸지 않고 확정된 값(NCSession·NCCombatRoom·NCPlayer)을 읽어 그리기만 한다.
 /// 버튼은 요청만 한다(방 만들기·참가·재도전·나가기).
 ///
@@ -18,6 +19,12 @@ public class NCUi : MonoBehaviour
     private NCConnectScreen _connect;
     private NCHud _hud;
     private NCResultScreen _result;
+    private NCLobbyScreen _lobby;
+    private NCMenuScreen _menu;
+    private NCConfirmPopup _confirm;
+
+    /// <summary>메뉴·확인 팝업이 열려 있어 내 게임 입력을 막아야 하는지(NCLauncher가 입력 수집 때 확인).</summary>
+    public static bool InputBlocked { get; private set; }
 
     public RectTransform Root => _root;
 
@@ -31,7 +38,7 @@ public class NCUi : MonoBehaviour
         "다운되었습니다성공필요나체력무" +
         "실패초과두명쓰러졌습니다제한안에하지못했경과최고기록없음팀횟수회신기록등록않습니도전가기" +
         "호스트가선택하기를는멀티플레이인협새만들고초대참가받은입력예취종형식확인해할수없가득찼연결이되어단합" +
-        "부족";
+        "부족대기실준비완료중취소게임시작호스트합니다복사했습니다방나가기동료가나갔습니다돌아왔습니다메뉴계속하기온라인진행됩니다닫기확인두의뢰종료됩니까Esc";
 
     private void Awake()
     {
@@ -59,10 +66,19 @@ public class NCUi : MonoBehaviour
         canvasObject.AddComponent<GraphicRaycaster>();
         _root = (RectTransform)canvasObject.transform;
 
-        // 그리는 순서: HUD → 결과 → 접속(가장 위)
+        // 그리는 순서: HUD → 대기실 → 결과 → 메뉴 → 접속 → 확인 팝업(가장 위)
         _hud = new NCHud(_root);
+        _confirm = new NCConfirmPopup(_root);
+        _lobby = new NCLobbyScreen(_root, _confirm);
         _result = new NCResultScreen(_root);
+        _menu = new NCMenuScreen(_root, _confirm);
         _connect = new NCConnectScreen(_root);
+        ((RectTransform)_root.Find("ConfirmPopup")).SetAsLastSibling();
+    }
+
+    private void OnDestroy()
+    {
+        InputBlocked = false;
     }
 
     private void Update()
@@ -70,15 +86,36 @@ public class NCUi : MonoBehaviour
         NCLauncher launcher = NCLauncher.Instance;
         bool connected = launcher != null && launcher.State == NCConnectState.Connected;
         NCSession session = NCSession.Instance;
-        bool finished = connected && session != null && session.Object != null && session.Object.IsValid && session.IsFinished;
+        bool ready = connected && session != null && session.Object != null && session.Object.IsValid;
+        bool lobby = ready && session.Phase == NCPhase.Lobby;
+        bool finished = ready && session.IsFinished;
+        bool inGame = connected && lobby == false && finished == false;
+
+        // 메뉴는 입구·진행 중에만. 결과가 확정되거나 대기실로 돌아가면 닫는다.
+        if (inGame == false && _menu.IsOpen)
+        {
+            _menu.Close();
+        }
+
+        if (connected == false && _confirm.IsOpen)
+        {
+            _confirm.Hide();
+        }
+
+        HandleEscape(inGame);
 
         _connect.SetVisible(connected == false);
-        _hud.SetVisible(connected && finished == false);
+        _lobby.SetVisible(lobby);
+        _hud.SetVisible(inGame);
         _result.SetVisible(finished);
 
         if (connected == false)
         {
             _connect.Tick(launcher);
+        }
+        else if (lobby)
+        {
+            _lobby.Tick(session, launcher);
         }
         else if (finished)
         {
@@ -87,6 +124,31 @@ public class NCUi : MonoBehaviour
         else
         {
             _hud.Tick(session, launcher);
+        }
+
+        InputBlocked = _menu.IsOpen || _confirm.IsOpen;
+    }
+
+    /// <summary>Esc는 위에 열린 것부터 하나씩 닫는다: 확인 팝업 → 메뉴. 게임 중이면 메뉴를 연다.</summary>
+    private void HandleEscape(bool inGame)
+    {
+        Keyboard keyboard = Keyboard.current;
+        if (keyboard == null || keyboard.escapeKey.wasPressedThisFrame == false)
+        {
+            return;
+        }
+
+        if (_confirm.IsOpen)
+        {
+            _confirm.Hide();
+        }
+        else if (_menu.IsOpen)
+        {
+            _menu.Close();
+        }
+        else if (inGame)
+        {
+            _menu.Open();
         }
     }
 }
