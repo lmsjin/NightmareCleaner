@@ -106,8 +106,26 @@ public class NCResultScreen
         }
     }
 
+    // 결과 값이 바뀔 때만 다시 그린다(매 프레임 문자열 생성 방지).
+    private long _shownKey = -1;
+
     public void Tick(NCSession session, NCLauncher launcher)
     {
+        long key = (long)session.Phase
+                   | (long)session.Cause << 4
+                   | (long)session.ClearedRooms << 8
+                   | (long)session.TotalRooms << 14
+                   | (long)session.TeamDownCount << 20
+                   | (session.IsNewRecord ? 1L : 0L) << 30
+                   | (long)session.ElapsedCentisec << 31;
+        key ^= (long)session.BestCentisec * 1000003L;
+
+        if (key == _shownKey)
+        {
+            return;
+        }
+
+        _shownKey = key;
         bool victory = session.Phase == NCPhase.Victory;
         Color tone = victory ? NCStyle.Success : NCStyle.Danger;
 

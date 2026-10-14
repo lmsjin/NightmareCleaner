@@ -34,6 +34,7 @@ public class NCHealth : NetworkBehaviour
     private NCPlayer _player;
 
     // 연출용(로컬)
+    private Color _shownColor = new Color(-1f, -1f, -1f, -1f);
     private int _seenHitCount;
     private float _flashTimer;
     private GameObject _downMarker;
@@ -216,7 +217,12 @@ public class NCHealth : NetworkBehaviour
                     color = Color.Lerp(color, Color.white, 0.5f);
                 }
 
-                renderer.material.color = color;
+                // 색이 바뀔 때만 적용한다.
+                if (color != _shownColor)
+                {
+                    _shownColor = color;
+                    renderer.material.color = color;
+                }
             }
         }
 

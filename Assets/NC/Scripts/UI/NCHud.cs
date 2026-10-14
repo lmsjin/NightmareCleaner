@@ -61,6 +61,16 @@ public class NCHud
     private readonly TextMeshProUGUI _downText;
     private readonly Image _downFill;
 
+    // 값이 바뀔 때만 글자를 새로 만들기 위한 이전 값(매 프레임 문자열 생성 → GC 끊김 방지)
+    private int _shownSeconds = -1;
+    private int _shownEntrance = -1;
+    private int _shownCleared = -1;
+    private int _shownTotal = -1;
+    private string _shownCode;
+    private int _shownEntryKey = -1;
+    private int _shownAmmo = -1;
+    private int _shownAmmoState = -1;
+
     // 알림 감지용(이전 프레임 값)
     private NCRoomState _lastRoomState = NCRoomState.Untouched;
     private bool _lastMateDown;
@@ -233,8 +243,19 @@ public class NCHud
     private void TickTop(NCSession session, bool ready, NCLauncher launcher, bool entrance)
     {
         float remaining = ready ? session.RemainingSeconds : NCBalance.Get.missionSeconds;
-        _timeText.text = NCMath.FormatClock(remaining);
-        _timeLabel.text = entrance ? "남은 시간 · 시작 전" : "남은 시간";
+        int seconds = Mathf.CeilToInt(Mathf.Max(0f, remaining));
+        if (seconds != _shownSeconds)
+        {
+            _shownSeconds = seconds;
+            _timeText.text = NCMath.FormatClock(seconds);
+        }
+
+        int entranceKey = entrance ? 1 : 0;
+        if (entranceKey != _shownEntrance)
+        {
+            _shownEntrance = entranceKey;
+            _timeLabel.text = entrance ? "남은 시간 · 시작 전" : "남은 시간";
+        }
 
         // 60초 이하는 붉게 깜빡여 강조
         bool urgent = ready && session.Phase == NCPhase.Playing && remaining <= 60f;
@@ -242,11 +263,17 @@ public class NCHud
 
         int total = ready ? Mathf.Max(1, session.TotalRooms) : NCCombatRoom.All.Count;
         int cleared = ready ? CountCleared() : 0;
-        _progressText.text = $"소탕 완료 {cleared}/{total}";
+        if (cleared != _shownCleared || total != _shownTotal)
+        {
+            _shownCleared = cleared;
+            _shownTotal = total;
+            _progressText.text = $"소탕 완료 {cleared}/{total}";
+        }
 
         _roomCode.SetActive(entrance && launcher != null);
-        if (launcher != null)
+        if (launcher != null && launcher.RoomCode != _shownCode)
         {
+            _shownCode = launcher.RoomCode;
             _roomCodeText.text = $"방 코드  <b><color=#F2C34E>{launcher.RoomCode}</color></b>";
         }
     }
@@ -277,6 +304,13 @@ public class NCHud
         }
 
         int required = NCBalance.Get.RequiredPlayers;
+        int key = session.PlayerCount * 100 + session.PlayersInZone * 10 + required;
+        if (key == _shownEntryKey)
+        {
+            return;
+        }
+
+        _shownEntryKey = key;
         _entryStatus.text = session.PlayerCount < required
             ? $"동료의 접속을 기다리는 중...  ({session.PlayerCount}/{required})"
             : $"동료와 중앙홀의 빛나는 원으로 이동하세요  ({session.PlayersInZone}/{session.PlayerCount})";
@@ -308,24 +342,23 @@ public class NCHud
         NCGun gun = me.Gun;
         bool reloading = gun.IsReloading;
 
-        _ammoText.text = $"{gun.Ammo} <size=60%><color=#F4F1E7AA>/ {gun.MagazineSize}</color></size>";
-        _ammoText.color = gun.Ammo == 0 ? NCStyle.Danger : NCStyle.Text;
+        if (gun.Ammo != _shownAmmo)
+        {
+            _shownAmmo = gun.Ammo;
+            _ammoText.text = $"{gun.Ammo} <size=60%><color=#F4F1E7AA>/ {gun.MagazineSize}</color></size>";
+            _ammoText.color = gun.Ammo == 0 ? NCStyle.Danger : NCStyle.Text;
+        }
 
-        if (reloading)
+        int state = reloading ? 1 : (gun.Ammo == 0 ? 2 : 0);
+        if (state != _shownAmmoState)
         {
-            _ammoHint.text = "재장전 중...";
-            _ammoHint.color = NCStyle.Text;
+            _shownAmmoState = state;
+            _ammoHint.text = state == 1 ? "재장전 중..." : (state == 2 ? "재장전 필요!" : "재장전");
         }
-        else if (gun.Ammo == 0)
-        {
-            _ammoHint.text = "재장전 필요!";
-            _ammoHint.color = Color.Lerp(NCStyle.Danger, NCStyle.Text, Mathf.PingPong(Time.time * 3f, 1f));
-        }
-        else
-        {
-            _ammoHint.text = "재장전";
-            _ammoHint.color = NCStyle.TextDim;
-        }
+
+        _ammoHint.color = state == 1
+            ? NCStyle.Text
+            : (state == 2 ? Color.Lerp(NCStyle.Danger, NCStyle.Text, Mathf.PingPong(Time.time * 3f, 1f)) : NCStyle.TextDim);
 
         _reloadBack.gameObject.SetActive(reloading);
         NCUiKit.SetBar(_reloadFill, gun.ReloadRatio);
@@ -562,6 +595,10 @@ public class NCHud
         private readonly TextMeshProUGUI _value;
         private readonly Image _fill;
         private readonly GameObject _downBadge;
+        private int _shownHp = -1;
+        private int _shownMax = -1;
+        private int _shownSlot = -1;
+        private string _shownLabel;
 
         public HealthPanel(RectTransform parent, string name, Vector2 position, Vector2 size, bool big)
         {
@@ -604,10 +641,26 @@ public class NCHud
             NCHealth health = player.Health;
             Color slotColor = player.SlotColor;
 
-            _tag.color = slotColor;
-            _tagText.text = player.SlotLabel;
-            _name.text = label;
-            _value.text = $"{health.Hp}<size=70%><color=#F4F1E7AA>/{health.MaxHp}</color></size>";
+            if (player.Slot != _shownSlot)
+            {
+                _shownSlot = player.Slot;
+                _tag.color = slotColor;
+                _tagText.text = player.SlotLabel;
+            }
+
+            if (label != _shownLabel)
+            {
+                _shownLabel = label;
+                _name.text = label;
+            }
+
+            if (health.Hp != _shownHp || health.MaxHp != _shownMax)
+            {
+                _shownHp = health.Hp;
+                _shownMax = health.MaxHp;
+                _value.text = $"{health.Hp}<size=70%><color=#F4F1E7AA>/{health.MaxHp}</color></size>";
+            }
+
             _fill.color = health.Ratio <= 0.3f ? NCStyle.Danger : slotColor;
             NCUiKit.SetBar(_fill, health.Ratio);
             _downBadge.SetActive(health.IsDown);

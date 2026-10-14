@@ -34,6 +34,7 @@ public class NCGhost : NetworkBehaviour
     private NavMeshAgent _agent;
 
     // 연출용
+    private Color _shownColor = new Color(-1f, -1f, -1f, -1f);
     private float _seenHp;
     private float _flashTimer;
     private Vector3 _bodyScale = Vector3.one;
@@ -289,7 +290,12 @@ public class NCGhost : NetworkBehaviour
 
         if (bodyRenderer != null)
         {
-            bodyRenderer.material.color = color;
+            // 색이 바뀔 때만 적용한다.
+            if (color != _shownColor)
+            {
+                _shownColor = color;
+                bodyRenderer.material.color = color;
+            }
         }
 
         // 둥실둥실 떠 있는 느낌 + 전조 때 부풀기(몸통 자식만 — 루트는 NetworkTransform이 다룬다)
