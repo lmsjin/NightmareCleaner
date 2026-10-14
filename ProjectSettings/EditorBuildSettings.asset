@@ -9,9 +9,6 @@ EditorBuildSettings:
     path: Assets/NC/Scenes/NC_Game.unity
     guid: 00746776c301c914784559b794490ca3
   - enabled: 0
-    path: Assets/_FusionArena/Scenes/FusionSlice.unity
-    guid: c83d2e6313005ee419b4221574935a00
-  - enabled: 0
     path: Assets/Scenes/start.unity
     guid: ebded4bbf7ef6d04781e74117051ec5d
   - enabled: 0
@@ -20,9 +17,6 @@ EditorBuildSettings:
   - enabled: 0
     path: Assets/Scenes/end.unity
     guid: eb2001cb3ec55714b83f217b1f1e3edf
-  - enabled: 0
-    path: Assets/Scenes/NetSlice.unity
-    guid: 5254fd61e0aebac4880cd25729c9cd05
   m_configObjects:
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   m_UseUCBPForAssetBundles: 0
