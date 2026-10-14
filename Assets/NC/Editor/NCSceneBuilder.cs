@@ -52,6 +52,7 @@ public static class NCSceneBuilder
 
         Transform[] entrySpawns = BuildMap(out Transform startZone, out GameObject mapRoot);
         BuildCombatRooms();
+        BuildSupplyBoxes();
         BuildSystems(entrySpawns, startZone);
 
         // 프리팹 참조는 모든 에셋 생성·임포트가 끝난 "맨 마지막"에 경로로 다시 불러와 연결한다.
@@ -456,11 +457,10 @@ public static class NCSceneBuilder
                 }
             }
 
-            // 보급방 이름표(보급함은 다음 단계)
+            // 보급방 장식(보급함은 BuildSupplyBoxes가 만든다)
             if (area.Kind == AreaKind.Supply)
             {
-                WorldLabel(area.Name + "\n<size=60%>보급방</size>", map, area.Center + Vector3.up * 2.8f, NCStyle.P2);
-                Box("Crate", map, area.Center + new Vector3(area.Rect.width * 0.3f, 0.35f, area.Rect.height * 0.2f), new Vector3(0.7f, 0.7f, 0.7f), table);
+                Box("Crate", map, area.Center + new Vector3(area.Rect.width * 0.32f, 0.35f, area.Rect.height * 0.2f), new Vector3(0.7f, 0.7f, 0.7f), table);
             }
 
             if (area.Decor == "tables")
@@ -670,6 +670,73 @@ public static class NCSceneBuilder
         tmp.rectTransform.sizeDelta = new Vector2(12f, 4f);
         tmp.textWrappingMode = TextWrappingModes.NoWrap;
         return tmp;
+    }
+
+    // ───────── 보급함 ─────────
+
+    // 보급방 ← 해금 전투방(OR). UI 기획서 16장.
+    private static readonly (string Box, string[] Rooms)[] SupplyLinks =
+    {
+        ("집무실", new[] { "서쪽 갤러리", "서쪽 응접실" }),
+        ("서고", new[] { "동쪽 응접실" }),
+        ("주방", new[] { "연회장", "창고" }),
+    };
+
+    private static void BuildSupplyBoxes()
+    {
+        Material wood = Mat("NC_Chest", NCStyle.Hex("6B4226"));
+        Material brass = Mat("NC_Brass", NCStyle.Hex("B6955E"));
+        Material glowMat = Mat("NC_SupplyGlow", NCStyle.Hex("F2C34E", 0.25f), transparent: true);
+
+        foreach ((string boxName, string[] roomNames) in SupplyLinks)
+        {
+            Area area = System.Array.Find(Areas, a => a.Name == boxName);
+            if (area == null)
+            {
+                continue;
+            }
+
+            GameObject boxObject = new GameObject("Supply_" + boxName);
+            boxObject.transform.position = area.Center + new Vector3(-area.Rect.width * 0.15f, 0f, 0f);
+            boxObject.AddComponent<NetworkObject>();
+            NCSupplyBox box = boxObject.AddComponent<NCSupplyBox>();
+            Transform b = boxObject.transform;
+
+            // 상자 본체 + 황동 띠 + 뚜껑(뒤쪽 모서리를 축으로 열림)
+            Box("Body", b, new Vector3(0f, 0.32f, 0f), new Vector3(1.2f, 0.64f, 0.8f), wood);
+            Box("Band", b, new Vector3(0f, 0.32f, 0f), new Vector3(1.22f, 0.1f, 0.82f), brass, false);
+            Transform lidPivot = new GameObject("LidPivot").transform;
+            lidPivot.SetParent(b, false);
+            lidPivot.localPosition = new Vector3(0f, 0.64f, -0.4f);
+            Box("Lid", lidPivot, new Vector3(0f, 0.07f, 0.4f), new Vector3(1.24f, 0.14f, 0.84f), wood, false);
+            Box("Lock", lidPivot, new Vector3(0f, 0.02f, 0.83f), new Vector3(0.14f, 0.16f, 0.04f), brass, false);
+
+            GameObject glow = Shape(PrimitiveType.Cylinder, "Glow", b, new Vector3(0f, 0.02f, 0f), new Vector3(2.2f, 0.005f, 2.2f), glowMat);
+            glow.layer = IgnoreRaycastLayer;
+            glow.SetActive(false);
+
+            TextMeshPro label = WorldLabel(boxName, b, boxObject.transform.position + Vector3.up * 2.4f, NCStyle.TextDim);
+            label.fontSize = 5.5f;
+            label.rectTransform.sizeDelta = new Vector2(14f, 4f);
+
+            List<Object> rooms = new List<Object>();
+            foreach (string roomName in roomNames)
+            {
+                GameObject roomObject = GameObject.Find("Room_" + roomName);
+                if (roomObject != null)
+                {
+                    rooms.Add(roomObject.GetComponent<NCCombatRoom>());
+                }
+            }
+
+            SerializedObject so = new SerializedObject(box);
+            so.FindProperty("boxName").stringValue = boxName;
+            so.ApplyModifiedPropertiesWithoutUndo();
+            AssignArray(box, "unlockRooms", rooms.ToArray());
+            Assign(box, "label", label);
+            Assign(box, "lid", lidPivot);
+            Assign(box, "glow", glow);
+        }
     }
 
     // ───────── 전투방 ─────────

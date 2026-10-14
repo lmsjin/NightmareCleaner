@@ -45,6 +45,18 @@ public class NCBalance : ScriptableObject
     [Tooltip("조준선 판정 두께(m). 클수록 맞히기 쉽다")]
     public float beamRadius = 0.3f;
 
+    [Header("과충전 (Q)")]
+    [Tooltip("과충전 효과 시간(초) — 탄약 무소모 + 빠른 연사")]
+    public float overchargeSeconds = 5f;
+    [Tooltip("과충전 중 사격 간격(초). 평소 fireInterval보다 짧게")]
+    public float overchargeFireInterval = 0.18f;
+
+    [Header("보급함")]
+    [Tooltip("보급함 사용 거리(m)")]
+    public float supplyRange = 1.5f;
+    [Tooltip("보급 1회 회복량(두 명 모두)")]
+    public int supplyHeal = 30;
+
     [Header("유령 — 기본형")]
     public float basicHp = 60f;
     public float basicMoveSpeed = 2.5f;

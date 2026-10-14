@@ -339,6 +339,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::NCGun
   _Ammo: 0
+  _Charges: 0
 --- !u!1 &3179050860629983012
 GameObject:
   m_ObjectHideFlags: 0

@@ -57,6 +57,9 @@ public class NCSession : NetworkBehaviour
     [Networked] public int BestCentisec { get; set; }
     [Networked] public NetworkBool IsNewRecord { get; set; }
 
+    /// <summary>이번 판에서 전투가 한 번이라도 시작됐는지. 첫 전투 전에는 과충전(Q)을 막는다.</summary>
+    [Networked] public NetworkBool CombatStarted { get; set; }
+
     /// <summary>게임 중 동료가 나가 대기실로 돌아온 횟수(대기실 안내용).</summary>
     [Networked] public int PartnerLeftCount { get; set; }
 
@@ -261,6 +264,11 @@ public class NCSession : NetworkBehaviour
             room.ServerHalt();
         }
 
+        foreach (NCPlayer player in NCPlayer.All)
+        {
+            player.Gun.ServerEndOvercharge();
+        }
+
         NCGhost.ServerDespawnAll(Runner);
         Debug.Log($"[NCSession] 결과: {result} {cause} {ElapsedCentisec / 100f:0.00}초 다운 {TeamDownCount}회");
     }
@@ -275,10 +283,18 @@ public class NCSession : NetworkBehaviour
             room.ServerReset();
         }
 
+        foreach (NCSupplyBox box in NCSupplyBox.All)
+        {
+            box.ServerReset();
+        }
+
+        CombatStarted = false;
+
         foreach (NCPlayer player in NCPlayer.All)
         {
             player.Health.ServerResetFull();
             player.Gun.ServerRefill();
+            player.Gun.ServerResetCharges();
             player.Ready = false;
 
             Transform point = NCLauncher.Instance != null ? NCLauncher.Instance.GetEntrySpawn(player.Slot) : null;

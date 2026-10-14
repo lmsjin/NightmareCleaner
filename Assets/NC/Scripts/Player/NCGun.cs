@@ -15,6 +15,44 @@ public class NCGun : NetworkBehaviour
     [Networked] private TickTimer ReloadTimer { get; set; }
     [Networked] private TickTimer FireCooldown { get; set; }
 
+    /// <summary>과충전 보유 수(0 또는 1).</summary>
+    [Networked] public int Charges { get; set; }
+
+    // 과충전 효과가 끝나는 시점. 사용 중이 아니면 None.
+    [Networked] private TickTimer OverchargeTimer { get; set; }
+
+    public bool IsOvercharged => OverchargeTimer.IsRunning && OverchargeTimer.Expired(Runner) == false;
+
+    /// <summary>과충전 효과 남은 비율(1 → 0). HUD 바용.</summary>
+    public float OverchargeRatio => IsOvercharged
+        ? Mathf.Clamp01((OverchargeTimer.RemainingTime(Runner) ?? 0f) / NCBalance.Get.overchargeSeconds)
+        : 0f;
+
+    /// <summary>
+    /// 지금 Q를 쓸 수 있는 상황인지. 첫 전투가 시작되기 전엔 불가, 이후엔 전투방이 진행 중(예고·전투·차수 사이)일 때만.
+    /// </summary>
+    public static bool IsOverchargeAllowed
+    {
+        get
+        {
+            NCSession session = NCSession.Instance;
+            if (session == null || session.IsMissionRunning == false || session.CombatStarted == false)
+            {
+                return false;
+            }
+
+            foreach (NCCombatRoom room in NCCombatRoom.All)
+            {
+                if (room.IsBusy)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
     public bool IsReloading => ReloadTimer.IsRunning;
     public int MagazineSize => NCBalance.Get.magazineSize;
 
@@ -60,21 +98,55 @@ public class NCGun : NetworkBehaviour
         Ammo = MagazineSize;
     }
 
+    /// <summary>방 소탕 보상: 과충전 1회 지급(보유 최대 1). Host 전용.</summary>
+    public void ServerGrantCharge()
+    {
+        if (Object.HasStateAuthority)
+        {
+            Charges = 1;
+        }
+    }
+
+    /// <summary>과충전 효과를 즉시 끝낸다(방 소탕·게임 종료). 환불 없음. Host 전용.</summary>
+    public void ServerEndOvercharge()
+    {
+        if (Object.HasStateAuthority)
+        {
+            OverchargeTimer = TickTimer.None;
+        }
+    }
+
+    /// <summary>재도전용: 보유·효과 모두 0으로.</summary>
+    public void ServerResetCharges()
+    {
+        if (Object.HasStateAuthority)
+        {
+            Charges = 0;
+            OverchargeTimer = TickTimer.None;
+        }
+    }
+
     public override void FixedUpdateNetwork()
     {
         NCBalance balance = NCBalance.Get;
 
-        // ① 재장전 완료
+        // ① 재장전 완료 · 과충전 시간 종료
         if (ReloadTimer.IsRunning && ReloadTimer.Expired(Runner))
         {
             ReloadTimer = TickTimer.None;
             Ammo = MagazineSize;
         }
 
-        // ② 행동 불가(다운·결과)면 진행 중 재장전도 취소
+        if (OverchargeTimer.IsRunning && OverchargeTimer.Expired(Runner))
+        {
+            OverchargeTimer = TickTimer.None;
+        }
+
+        // ② 행동 불가(다운·결과)면 진행 중 재장전과 과충전 효과도 끝낸다.
         if (_player.CanAct == false)
         {
             ReloadTimer = TickTimer.None;
+            OverchargeTimer = TickTimer.None;
             return;
         }
 
@@ -83,8 +155,17 @@ public class NCGun : NetworkBehaviour
             return;
         }
 
-        // ③ 재장전 시작
-        if (IsReloading == false)
+        // ③ 과충전 발동: 보유 소비 → 탄창 가득 · 재장전 취소 · 5초간 무소모 + 빠른 연사
+        if (input.IsDown(NCButton.Overcharge) && Charges > 0 && IsOvercharged == false && IsOverchargeAllowed)
+        {
+            Charges--;
+            ReloadTimer = TickTimer.None;
+            Ammo = MagazineSize;
+            OverchargeTimer = TickTimer.CreateFromSeconds(Runner, balance.overchargeSeconds);
+        }
+
+        // ④ 재장전 시작(과충전 중에는 탄이 줄지 않으니 필요 없음)
+        if (IsReloading == false && IsOvercharged == false)
         {
             bool manual = input.IsDown(NCButton.Reload) && Ammo < MagazineSize;
             bool auto = balance.autoReloadWhenEmpty && Ammo <= 0;
@@ -95,7 +176,7 @@ public class NCGun : NetworkBehaviour
             }
         }
 
-        // ④ 발사
+        // ⑤ 발사
         if (input.IsDown(NCButton.Fire) == false || IsReloading || Ammo <= 0)
         {
             return;
@@ -106,8 +187,13 @@ public class NCGun : NetworkBehaviour
             return;
         }
 
-        FireCooldown = TickTimer.CreateFromSeconds(Runner, balance.fireInterval);
-        Ammo--;
+        bool overcharged = IsOvercharged;
+        FireCooldown = TickTimer.CreateFromSeconds(Runner, overcharged ? balance.overchargeFireInterval : balance.fireInterval);
+
+        if (overcharged == false)
+        {
+            Ammo--;
+        }
 
         if (Object.HasStateAuthority)
         {
@@ -138,7 +224,7 @@ public class NCGun : NetworkBehaviour
             target.ServerTakeDamage(balance.shotDamage);
         }
 
-        RpcShowShot(muzzle, end, _player.Slot, target != null);
+        RpcShowShot(muzzle, end, _player.Slot, target != null, IsOvercharged);
     }
 
     /// <summary>벽·봉쇄 장벽까지의 거리. 플레이어·유령·트리거는 통과.</summary>
@@ -192,8 +278,10 @@ public class NCGun : NetworkBehaviour
     }
 
     [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
-    private void RpcShowShot(Vector3 from, Vector3 to, int slot, NetworkBool hit)
+    private void RpcShowShot(Vector3 from, Vector3 to, int slot, NetworkBool hit, NetworkBool overcharged)
     {
-        NCFx.Shot(from, to, NCStyle.SlotColor(slot), hit);
+        // 과충전 중에는 구름탄이 하얗게 빛난다.
+        Color color = overcharged ? Color.Lerp(Color.white, NCStyle.P1, 0.15f) : NCStyle.SlotColor(slot);
+        NCFx.Shot(from, to, color, hit);
     }
 }

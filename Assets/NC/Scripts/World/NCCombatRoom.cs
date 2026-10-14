@@ -296,6 +296,12 @@ public class NCCombatRoom : NetworkBehaviour
         if (State == NCRoomState.Warning && PhaseTimer.Expired(Runner))
         {
             State = NCRoomState.Fighting;
+
+            // 이번 판의 첫 전투가 시작됐다 → 이후로는 과충전(Q) 사용 가능.
+            if (NCSession.Instance != null)
+            {
+                NCSession.Instance.CombatStarted = true;
+            }
         }
 
         // 동시 상한까지 예약(예고)을 채운다.
@@ -355,14 +361,33 @@ public class NCCombatRoom : NetworkBehaviour
             anyoneAlive |= player.Health.IsDown == false;
         }
 
+        // 마지막 방이면 보상 없이 결과로 간다(세션이 다음 Tick에 성공 확정).
+        bool isFinalRoom = true;
+        foreach (NCCombatRoom room in All)
+        {
+            if (room != this && room.State != NCRoomState.Cleared)
+            {
+                isFinalRoom = false;
+            }
+        }
+
         foreach (NCPlayer player in NCPlayer.All)
         {
+            // 사용 중이던 과충전은 먼저 끝낸다(환불 없음).
+            player.Gun.ServerEndOvercharge();
+
             if (anyoneAlive)
             {
                 player.Health.ServerRevive();
             }
 
             player.Gun.ServerRefill();
+
+            // 비최종 방 소탕: 각자 과충전 1회(보유 최대 1).
+            if (isFinalRoom == false)
+            {
+                player.Gun.ServerGrantCharge();
+            }
         }
 
         Debug.Log($"[NCCombatRoom] {roomName}: 소탕 완료");

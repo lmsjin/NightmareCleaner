@@ -98,6 +98,17 @@ public class NCHealth : NetworkBehaviour
         InvincibleTimer = TickTimer.CreateFromSeconds(Runner, balance.reviveProtectSeconds);
     }
 
+    /// <summary>보급 회복. 다운된 사람은 회복하지 않는다(보급은 부활 수단이 아님). Host 전용.</summary>
+    public void ServerHeal(int amount)
+    {
+        if (Object.HasStateAuthority == false || IsDown)
+        {
+            return;
+        }
+
+        Hp = Mathf.Min(MaxHp, Hp + amount);
+    }
+
     /// <summary>재도전용: 체력 가득, 다운·무적·구조 진행 해제.</summary>
     public void ServerResetFull()
     {

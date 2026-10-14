@@ -7,6 +7,7 @@ public enum NCButton
     Fire = 0,     // 좌클릭(홀드 연사)
     Reload = 1,   // R
     Interact = 2, // E(홀드)
+    Overcharge = 3, // Q
 }
 
 /// <summary>

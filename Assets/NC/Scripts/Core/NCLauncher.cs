@@ -317,6 +317,7 @@ public class NCLauncher : MonoBehaviour
 
             data.Buttons.Set(NCButton.Reload, keyboard.rKey.isPressed);
             data.Buttons.Set(NCButton.Interact, keyboard.eKey.isPressed);
+            data.Buttons.Set(NCButton.Overcharge, keyboard.qKey.isPressed);
         }
 
         if (mouse != null)

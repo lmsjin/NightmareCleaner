@@ -71,6 +71,22 @@ public class NCHud
     private int _shownAmmo = -1;
     private int _shownAmmoState = -1;
 
+    // 과충전 패널
+    private Image _chargeIcon;
+    private Image _chargeRing;
+    private TextMeshProUGUI _chargeText;
+    private Image _chargeFill;
+    private RectTransform _chargeBar;
+    private int _shownChargeState = -1;
+
+    // 알림 감지(과충전·보급)
+    private int _lastCharges;
+    private readonly System.Collections.Generic.Dictionary<NCSupplyBox, NCSupplyState> _lastSupplyStates =
+        new System.Collections.Generic.Dictionary<NCSupplyBox, NCSupplyState>();
+    private int _lastSupplyUses;
+
+    private static NCHud _instance;
+
     // 알림 감지용(이전 프레임 값)
     private readonly System.Collections.Generic.Dictionary<NCCombatRoom, NCRoomState> _lastRoomStates =
         new System.Collections.Generic.Dictionary<NCCombatRoom, NCRoomState>();
@@ -80,6 +96,7 @@ public class NCHud
     public NCHud(RectTransform canvas)
     {
         _canvas = canvas;
+        _instance = this;
         RectTransform root = NCUiKit.NewRect("Hud", canvas);
         NCUiKit.Stretch(root);
         _root = root.gameObject;
@@ -138,7 +155,7 @@ public class NCHud
 
         // ── 탄약(오른쪽 하단) ──
         RectTransform ammo = NCUiKit.NewPanel("Ammo", root);
-        NCUiKit.Place(ammo, new Vector2(1f, 0f), new Vector2(-NCStyle.Margin, NCStyle.Margin), new Vector2(300f, 104f));
+        NCUiKit.Place(ammo, new Vector2(1f, 0f), new Vector2(-NCStyle.Margin - 172f - NCStyle.Gap, NCStyle.Margin), new Vector2(300f, 104f));
         TextMeshProUGUI cloud = NCUiKit.NewText("Icon", ammo, "●", 34f, NCStyle.Text);
         NCUiKit.Place(cloud.rectTransform, new Vector2(0f, 1f), new Vector2(18f, -14f), new Vector2(40f, 44f));
         _ammoText = NCUiKit.NewText("Value", ammo, "12 / 12", NCStyle.FontTimer, NCStyle.Text, TextAlignmentOptions.Left, FontStyles.Bold);
@@ -149,6 +166,8 @@ public class NCHud
         NCUiKit.Place(_ammoHint.rectTransform, new Vector2(0f, 0f), new Vector2(58f, 16f), new Vector2(220f, 28f));
         _reloadFill = NCUiKit.NewBar("ReloadBar", ammo, NCStyle.Text, out _reloadBack);
         NCUiKit.Place(_reloadBack, new Vector2(0.5f, 0f), new Vector2(0f, -14f), new Vector2(280f, 12f));
+
+        BuildChargePanel(root);
 
         // ── 상호작용 안내 ──
         _prompt = NCUiKit.NewPanel("Prompt", root, deep: true);
@@ -176,6 +195,89 @@ public class NCHud
         _downFill = NCUiKit.NewBar("Bar", down, NCStyle.Success, out RectTransform downBar);
         NCUiKit.Place(downBar, new Vector2(0.5f, 0f), new Vector2(0f, 14f), new Vector2(500f, 16f));
         _downPanel = down.gameObject;
+    }
+
+    /// <summary>과충전 패널(UI 기획서 10장): 같은 아이콘의 밝기·테두리로 충전 없음 / 준비 / 사용 중을 구분하고 문구를 함께 쓴다.</summary>
+    private void BuildChargePanel(RectTransform root)
+    {
+        RectTransform panel = NCUiKit.NewPanel("Charge", root);
+        NCUiKit.Place(panel, new Vector2(1f, 0f), new Vector2(-NCStyle.Margin, NCStyle.Margin), new Vector2(172f, 104f));
+
+        _chargeRing = NCUiKit.NewImage("Ring", panel, NCUiKit.CircleSprite, NCStyle.BrassDim);
+        NCUiKit.Place(_chargeRing.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -8f), new Vector2(54f, 54f));
+        _chargeIcon = NCUiKit.NewImage("Icon", _chargeRing.rectTransform, NCUiKit.CircleSprite, NCStyle.PanelDeep);
+        NCUiKit.Place(_chargeIcon.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(44f, 44f));
+        TextMeshProUGUI bolt = NCUiKit.NewText("Bolt", _chargeIcon.rectTransform, "Q", 26f, NCStyle.Text, style: FontStyles.Bold);
+        NCUiKit.Stretch(bolt.rectTransform);
+
+        _chargeText = NCUiKit.NewText("Text", panel, "충전 없음", 18f, NCStyle.TextDim);
+        NCUiKit.Place(_chargeText.rectTransform, new Vector2(0.5f, 0f), new Vector2(0f, 14f), new Vector2(160f, 24f));
+
+        _chargeFill = NCUiKit.NewBar("Bar", panel, NCStyle.P1, out _chargeBar);
+        NCUiKit.Place(_chargeBar, new Vector2(0.5f, 0f), new Vector2(0f, -14f), new Vector2(160f, 12f));
+    }
+
+    private void TickCharge(NCPlayer me)
+    {
+        if (me == null || me.Gun == null || me.Object == null || me.Object.IsValid == false)
+        {
+            return;
+        }
+
+        NCGun gun = me.Gun;
+        bool active = gun.IsOvercharged;
+        bool allowed = NCGun.IsOverchargeAllowed && me.Health.IsDown == false;
+
+        // 0 = 충전 없음, 1 = 준비(지금 사용 가능), 2 = 보유했지만 지금은 못 씀, 3 = 사용 중
+        int state = active ? 3 : (gun.Charges > 0 ? (allowed ? 1 : 2) : 0);
+
+        if (state != _shownChargeState)
+        {
+            _shownChargeState = state;
+
+            switch (state)
+            {
+                case 0:
+                    _chargeText.text = "충전 없음";
+                    _chargeText.color = NCStyle.TextDim;
+                    _chargeRing.color = NCStyle.Hex("B6955E", 0.25f);
+                    _chargeIcon.color = NCStyle.PanelDeep;
+                    break;
+                case 1:
+                    _chargeText.text = "과충전 준비";
+                    _chargeText.color = NCStyle.P1;
+                    _chargeRing.color = NCStyle.P1;
+                    _chargeIcon.color = NCStyle.Hex("234A78");
+                    break;
+                case 2:
+                    _chargeText.text = "전투 중 사용 가능";
+                    _chargeText.color = NCStyle.Text;
+                    _chargeRing.color = NCStyle.Brass;
+                    _chargeIcon.color = NCStyle.Hex("234A78", 0.6f);
+                    break;
+                default:
+                    _chargeText.text = "과충전 사용 중";
+                    _chargeText.color = Color.white;
+                    _chargeRing.color = Color.white;
+                    _chargeIcon.color = NCStyle.P1;
+                    break;
+            }
+        }
+
+        // 준비 상태는 은은하게 깜빡여 눈에 띄게
+        if (state == 1)
+        {
+            _chargeRing.color = Color.Lerp(NCStyle.P1, Color.white, Mathf.PingPong(Time.time * 2f, 1f) * 0.6f);
+        }
+
+        _chargeBar.gameObject.SetActive(active);
+        NCUiKit.SetBar(_chargeFill, gun.OverchargeRatio);
+    }
+
+    /// <summary>다른 스크립트가 이 PC 화면에 잠깐 안내를 띄울 때(예: 보급함 "체력이 충분합니다").</summary>
+    public static void Notify(string text, Color accent)
+    {
+        _instance?.ShowMessage(text, NCBalance.Get.messageSeconds, 3, accent);
     }
 
     private static Image BuildChip(RectTransform parent, int slot, Vector2 position)
@@ -235,6 +337,7 @@ public class NCHud
         TickEntrance(session, entrance);
         TickHealth(me);
         TickAmmo(me);
+        TickCharge(me);
         TickPrompt(me, playing);
         TickDown(me);
         DetectEvents(session, me, playing);
@@ -343,14 +446,17 @@ public class NCHud
         NCGun gun = me.Gun;
         bool reloading = gun.IsReloading;
 
-        if (gun.Ammo != _shownAmmo)
+        int ammoKey = gun.IsOvercharged ? -100 : gun.Ammo;
+        if (ammoKey != _shownAmmo)
         {
-            _shownAmmo = gun.Ammo;
-            _ammoText.text = $"{gun.Ammo} <size=60%><color=#F4F1E7AA>/ {gun.MagazineSize}</color></size>";
-            _ammoText.color = gun.Ammo == 0 ? NCStyle.Danger : NCStyle.Text;
+            _shownAmmo = ammoKey;
+            _ammoText.text = gun.IsOvercharged
+                ? "무소모"
+                : $"{gun.Ammo} <size=60%><color=#F4F1E7AA>/ {gun.MagazineSize}</color></size>";
+            _ammoText.color = gun.IsOvercharged ? NCStyle.P1 : (gun.Ammo == 0 ? NCStyle.Danger : NCStyle.Text);
         }
 
-        int state = reloading ? 1 : (gun.Ammo == 0 ? 2 : 0);
+        int state = reloading ? 1 : (gun.Ammo == 0 && gun.IsOvercharged == false ? 2 : 0);
         if (state != _shownAmmoState)
         {
             _shownAmmoState = state;
@@ -373,7 +479,7 @@ public class NCHud
 
         if (me != null && me.Object != null && me.Object.IsValid && me.Health.IsDown == false)
         {
-            shown = TryRevivePrompt(me) || TryDummyPrompt(me);
+            shown = TryRevivePrompt(me) || TryDummyPrompt(me) || TrySupplyPrompt(me);
         }
 
         _prompt.gameObject.SetActive(shown);
@@ -460,6 +566,36 @@ public class NCHud
         return false;
     }
 
+    private bool TrySupplyPrompt(NCPlayer me)
+    {
+        foreach (NCSupplyBox box in NCSupplyBox.All)
+        {
+            if (box.Object == null || box.Object.IsValid == false || NCMath.FlatDistance(box.transform.position, me.transform.position) > NCBalance.Get.supplyRange + 0.5f)
+            {
+                continue;
+            }
+
+            string text;
+            switch (box.State)
+            {
+                case NCSupplyState.Locked:
+                    text = $"잠김 · {box.UnlockText} 소탕 후 사용";
+                    break;
+                case NCSupplyState.Used:
+                    text = "사용 완료";
+                    break;
+                default:
+                    text = NCSupplyBox.IsBlockedByCombat() ? "전투 중에는 사용할 수 없습니다" : "보급 사용 · 두 명 체력 +30";
+                    break;
+            }
+
+            ShowPrompt(box.transform.position + Vector3.up * 1.6f, text, 0f, NCStyle.P2, chips: false, mask: 0);
+            return true;
+        }
+
+        return false;
+    }
+
     private void ShowPrompt(Vector3 world, string text, float ratio, Color barColor, bool chips, int mask)
     {
         Camera cam = Camera.main;
@@ -488,6 +624,7 @@ public class NCHud
         _chip2.color = (mask & 2) != 0 ? NCStyle.P2 : NCStyle.Hex("F2C34E", 0.25f);
         _promptFill.color = barColor;
         NCUiKit.SetBar(_promptFill, ratio);
+        _promptBar.gameObject.SetActive(ratio > 0f || chips);
     }
 
     private void TickDown(NCPlayer me)
@@ -567,6 +704,42 @@ public class NCHud
 
         _lastMateDown = mateDown;
         _lastReviveTotal = reviveTotal;
+
+        // 과충전 지급(소탕 알림과 겹치지 않도록 조금 늦게 덮어쓴다 — 같은 우선순위)
+        int charges = me != null && me.Object != null && me.Object.IsValid ? me.Gun.Charges : 0;
+        if (charges > _lastCharges)
+        {
+            ShowMessage("과충전 충전됨 · Q로 사용", NCBalance.Get.messageSeconds, 1, NCStyle.P1);
+        }
+
+        _lastCharges = charges;
+
+        // 보급 해금·사용
+        int uses = 0;
+        foreach (NCSupplyBox box in NCSupplyBox.All)
+        {
+            if (box.Object == null || box.Object.IsValid == false)
+            {
+                continue;
+            }
+
+            uses += box.UseCount;
+            NCSupplyState state = box.State;
+
+            if (_lastSupplyStates.TryGetValue(box, out NCSupplyState last) && last == NCSupplyState.Locked && state == NCSupplyState.Available)
+            {
+                ShowMessage($"보급 해금 · {box.BoxName}", NCBalance.Get.messageSeconds, 0, NCStyle.P2);
+            }
+
+            _lastSupplyStates[box] = state;
+        }
+
+        if (uses > _lastSupplyUses)
+        {
+            ShowMessage("보급 사용 · 두 명 체력 +30", NCBalance.Get.messageSeconds, 3, NCStyle.Success);
+        }
+
+        _lastSupplyUses = uses;
     }
 
     /// <summary>우선순위가 같거나 높을 때만 바꾼다. 늦게 큐에서 재생하지 않는다.</summary>
