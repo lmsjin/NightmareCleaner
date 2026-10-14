@@ -248,7 +248,9 @@ public class NCLauncher : MonoBehaviour
         Vector3 position = point != null ? point.position : Vector3.up;
         Quaternion rotation = point != null ? point.rotation : Quaternion.identity;
 
-        NetworkObject spawned = runner.Spawn(playerPrefab, position, rotation, player,
+        // 씬 연결이 비어 있으면 Resources에서 불러온다(빌더 재생성 중 연결이 깨져도 동작하도록).
+        NetworkObject prefab = playerPrefab != null ? playerPrefab : Resources.Load<NetworkObject>("NC_Player");
+        NetworkObject spawned = runner.Spawn(prefab, position, rotation, player,
             (r, obj) => obj.GetComponent<NCPlayer>().Slot = slot);
 
         runner.SetPlayerObject(player, spawned);

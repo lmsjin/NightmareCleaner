@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Fusion;
+using TMPro;
 using UnityEngine;
 using UnityEngine.AI;
 
@@ -60,6 +61,8 @@ public class NCCombatRoom : NetworkBehaviour
     [SerializeField] private GameObject[] barriers;
     [Tooltip("유령 출현 지점")]
     [SerializeField] private Transform[] spawnPoints;
+    [Tooltip("방 위에 떠 있는 이름표(상태에 따라 문구·색이 바뀜)")]
+    [SerializeField] private TextMeshPro label;
 
     [Header("유령 구성")]
     [SerializeField] private Wave[] waves =
@@ -109,6 +112,9 @@ public class NCCombatRoom : NetworkBehaviour
     private readonly List<NCGhost> _alive = new List<NCGhost>();
     private int _basicLeft;
     private int _fastLeft;
+
+    // 이름표를 상태가 바뀔 때만 갱신하기 위한 이전 값(연출용)
+    private int _shownLabelState = -1;
 
     private void Awake()
     {
@@ -407,7 +413,9 @@ public class NCCombatRoom : NetworkBehaviour
             Pending pending = _pending[i];
             _pending.RemoveAt(i);
 
-            NetworkObject spawned = Runner.Spawn(ghostPrefab, pending.Position, Quaternion.identity, null,
+            // 씬 연결이 비어 있으면 Resources에서 불러온다.
+            NetworkObject prefab = ghostPrefab != null ? ghostPrefab : Resources.Load<NetworkObject>("NC_Ghost");
+            NetworkObject spawned = Runner.Spawn(prefab, pending.Position, Quaternion.identity, null,
                 (runner, obj) => obj.GetComponent<NCGhost>().Type = pending.Type);
 
             if (spawned != null)
@@ -497,6 +505,27 @@ public class NCCombatRoom : NetworkBehaviour
         return false;
     }
 
+    /// <summary>방 이름표: 미소탕(아이보리) / 전투 중(붉게) / 소탕 완료(초록).</summary>
+    private void UpdateLabel()
+    {
+        if (label == null)
+        {
+            return;
+        }
+
+        int state = State == NCRoomState.Cleared ? 2 : (IsBusy ? 1 : 0);
+        if (state == _shownLabelState)
+        {
+            return;
+        }
+
+        _shownLabelState = state;
+        label.text = state == 2
+            ? $"{roomName}\n<size=60%>소탕 완료</size>"
+            : (state == 1 ? $"{roomName}\n<size=60%>전투 중</size>" : roomName);
+        label.color = state == 2 ? NCStyle.Success : (state == 1 ? NCStyle.GhostTelegraph : NCStyle.Text);
+    }
+
     [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
     private void RpcShowWarning(Vector3 position, float seconds)
     {
@@ -531,6 +560,8 @@ public class NCCombatRoom : NetworkBehaviour
                 NCFx.DustPuff(dummy.position + Vector3.up * 0.5f);
             }
         }
+
+        UpdateLabel();
 
         // 정리 중에는 더미가 살짝 흔들린다.
         if (dummy != null && showDummy)

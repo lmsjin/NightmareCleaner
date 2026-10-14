@@ -305,6 +305,8 @@ MonoBehaviour:
     _value: 0
   _IsFiring:
     _value: 0
+  _Ready:
+    _value: 0
 --- !u!114 &5425901284309806219
 MonoBehaviour:
   m_ObjectHideFlags: 0

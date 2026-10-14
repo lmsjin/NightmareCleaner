@@ -72,7 +72,8 @@ public class NCHud
     private int _shownAmmoState = -1;
 
     // 알림 감지용(이전 프레임 값)
-    private NCRoomState _lastRoomState = NCRoomState.Untouched;
+    private readonly System.Collections.Generic.Dictionary<NCCombatRoom, NCRoomState> _lastRoomStates =
+        new System.Collections.Generic.Dictionary<NCCombatRoom, NCRoomState>();
     private bool _lastMateDown;
     private int _lastReviveTotal;
 
@@ -508,6 +509,7 @@ public class NCHud
 
     private void DetectEvents(NCSession session, NCPlayer me, bool playing)
     {
+        // 방마다 이전 상태를 기억해, 어느 방이든 상태가 바뀌는 순간 알린다.
         foreach (NCCombatRoom room in NCCombatRoom.All)
         {
             if (room.Object == null || room.Object.IsValid == false)
@@ -516,22 +518,29 @@ public class NCHud
             }
 
             NCRoomState state = room.State;
-            if (state != _lastRoomState)
+            if (_lastRoomStates.TryGetValue(room, out NCRoomState last) == false)
             {
-                if (state == NCRoomState.Warning)
-                {
-                    // 차수는 예고 1.5초 동안만 알린다.
-                    ShowMessage($"유령 출현 · {room.WaveIndex + 1}차", NCBalance.Get.spawnWarningSeconds, 2, NCStyle.GhostTelegraph);
-                }
-                else if (state == NCRoomState.Cleared && playing)
-                {
-                    ShowMessage("◆ 전투방 소탕 완료 ◆", NCBalance.Get.messageSeconds, 1, NCStyle.Success);
-                }
-
-                _lastRoomState = state;
+                _lastRoomStates[room] = state;
+                continue;
             }
 
-            break; // 방 하나 기준
+            if (state == last)
+            {
+                continue;
+            }
+
+            if (state == NCRoomState.Warning)
+            {
+                // 차수는 예고 1.5초 동안만 알린다.
+                ShowMessage($"유령 출현 · {room.WaveIndex + 1}차", NCBalance.Get.spawnWarningSeconds, 2, NCStyle.GhostTelegraph);
+            }
+            else if (state == NCRoomState.Cleared && playing)
+            {
+                int total = Mathf.Max(1, NCCombatRoom.All.Count);
+                ShowMessage($"◆ {room.RoomName} 소탕 완료 ({CountCleared()}/{total}) ◆", NCBalance.Get.messageSeconds, 1, NCStyle.Success);
+            }
+
+            _lastRoomStates[room] = state;
         }
 
         NCPlayer mate = null;

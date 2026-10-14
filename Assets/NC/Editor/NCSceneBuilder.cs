@@ -16,7 +16,7 @@ using UnityEngine.SceneManagement;
 /// 연결 필드는 코드가 직접 넣으므로 MCP 연결 오류가 생기지 않는다. 다시 실행하면 씬을 새로 만든다.
 ///
 /// 맵(1유닛 = 1m, 벽 높이 3m):
-///   저택 입구 복도(3×8) → 중앙홀(8×8, 시작 영역) → 출입구 A → 전투방 "연회장"(12×10) ↔ 출입구 B ↔ 창고(4×4)
+///   입구 복도 → 중앙홀(시작 영역) → 전투방 5개(서쪽 갤러리·서쪽 응접실·동쪽 응접실·연회장·창고) + 보급방 3개(집무실·서고·주방)
 /// </summary>
 public static class NCSceneBuilder
 {
@@ -45,34 +45,34 @@ public static class NCSceneBuilder
         BuildGhostPrefab();
 
         // Fusion이 새 프리팹을 네트워크 프리팹 목록에 올리도록 한다.
-        // 이 과정에서 프리팹이 다시 임포트되어 앞서 받은 참조가 무효가 되므로, 경로로 다시 불러온다.
         EditorApplication.ExecuteMenuItem("Tools/Fusion/Rebuild Prefab Table");
-        AssetDatabase.SaveAssets();
-        AssetDatabase.Refresh();
-        NetworkObject playerPrefab = AssetDatabase.LoadAssetAtPath<NetworkObject>(Root + "/Prefabs/NC_Player.prefab");
-        NetworkObject ghostPrefab = AssetDatabase.LoadAssetAtPath<NetworkObject>(Root + "/Prefabs/NC_Ghost.prefab");
-
-        if (playerPrefab == null || ghostPrefab == null)
-        {
-            Debug.LogError("[NCSceneBuilder] 프리팹을 불러오지 못했습니다. 메뉴를 한 번 더 실행해 주세요.");
-            return;
-        }
 
         Scene scene = EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects, NewSceneMode.Single);
         SetupCameraAndLight();
 
         Transform[] entrySpawns = BuildMap(out Transform startZone, out GameObject mapRoot);
-        BuildCombatRoom(ghostPrefab);
-        BuildSystems(playerPrefab, entrySpawns, startZone);
+        BuildCombatRooms();
+        BuildSystems(entrySpawns, startZone);
+
+        // 프리팹 참조는 모든 에셋 생성·임포트가 끝난 "맨 마지막"에 경로로 다시 불러와 연결한다.
+        // (중간에 프리팹이 다시 임포트되면 먼저 받아 둔 참조가 무효가 되어 빈 칸으로 저장되는 문제 방지)
+        AssetDatabase.SaveAssets();
+        AssetDatabase.Refresh();
+        AssignPrefabs();
 
         EditorSceneManager.SaveScene(scene, ScenePath);
         AddSceneToBuildList();
+        VerifyPrefabLinks();
 
         Debug.Log("[NCSceneBuilder] 완료: " + ScenePath + " — Play 후 [방 만들기]로 시작하세요. " +
                   "혼자 테스트하려면 Assets/NC/Resources/NCBalance 의 Solo Test 를 켜세요.");
     }
 
     // ───────── 준비 ─────────
+
+    // 프리팹은 Resources에 둔다 → 씬 연결이 비어도 게임이 Resources.Load로 대신 불러올 수 있다.
+    private const string PlayerPrefabPath = Root + "/Resources/NC_Player.prefab";
+    private const string GhostPrefabPath = Root + "/Resources/NC_Ghost.prefab";
 
     private static void EnsureFolders()
     {
@@ -82,6 +82,59 @@ public static class NCSceneBuilder
             {
                 AssetDatabase.CreateFolder(Root, folder);
             }
+        }
+
+        // 예전 위치(Prefabs)의 프리팹은 GUID를 유지한 채 Resources로 옮긴다.
+        MoveIfExists(Root + "/Prefabs/NC_Player.prefab", PlayerPrefabPath);
+        MoveIfExists(Root + "/Prefabs/NC_Ghost.prefab", GhostPrefabPath);
+    }
+
+    private static void MoveIfExists(string from, string to)
+    {
+        if (AssetDatabase.LoadAssetAtPath<GameObject>(from) != null && AssetDatabase.LoadAssetAtPath<GameObject>(to) == null)
+        {
+            string error = AssetDatabase.MoveAsset(from, to);
+            if (string.IsNullOrEmpty(error) == false)
+            {
+                Debug.LogWarning("[NCSceneBuilder] 프리팹 이동 실패: " + error);
+            }
+        }
+    }
+
+    private static void AssignPrefabs()
+    {
+        NetworkObject playerPrefab = AssetDatabase.LoadAssetAtPath<NetworkObject>(PlayerPrefabPath);
+        NetworkObject ghostPrefab = AssetDatabase.LoadAssetAtPath<NetworkObject>(GhostPrefabPath);
+
+        foreach (NCLauncher launcher in Object.FindObjectsByType<NCLauncher>(FindObjectsSortMode.None))
+        {
+            Assign(launcher, "playerPrefab", playerPrefab);
+        }
+
+        foreach (NCCombatRoom room in Object.FindObjectsByType<NCCombatRoom>(FindObjectsSortMode.None))
+        {
+            Assign(room, "ghostPrefab", ghostPrefab);
+        }
+    }
+
+    /// <summary>저장된 씬의 프리팹 연결을 확인한다. 비어 있어도 게임은 Resources에서 불러오지만, 알려는 준다.</summary>
+    private static void VerifyPrefabLinks()
+    {
+        int missing = 0;
+
+        foreach (NCLauncher launcher in Object.FindObjectsByType<NCLauncher>(FindObjectsSortMode.None))
+        {
+            missing += new SerializedObject(launcher).FindProperty("playerPrefab").objectReferenceValue == null ? 1 : 0;
+        }
+
+        foreach (NCCombatRoom room in Object.FindObjectsByType<NCCombatRoom>(FindObjectsSortMode.None))
+        {
+            missing += new SerializedObject(room).FindProperty("ghostPrefab").objectReferenceValue == null ? 1 : 0;
+        }
+
+        if (missing > 0)
+        {
+            Debug.LogWarning($"[NCSceneBuilder] 프리팹 연결 {missing}곳이 비어 있습니다. 실행 중에는 Resources에서 자동으로 불러옵니다.");
         }
     }
 
@@ -228,7 +281,7 @@ public static class NCSceneBuilder
         Assign(player, "bodyRenderer", torso.GetComponent<Renderer>());
         Assign(player, "nozzle", nozzle);
 
-        string path = Root + "/Prefabs/NC_Player.prefab";
+        string path = PlayerPrefabPath;
         GameObject prefab = PrefabUtility.SaveAsPrefabAsset(root, path);
         Object.DestroyImmediate(root);
         return prefab.GetComponent<NetworkObject>();
@@ -255,7 +308,7 @@ public static class NCSceneBuilder
 
         Assign(ghost, "bodyRenderer", body.GetComponent<Renderer>());
 
-        string path = Root + "/Prefabs/NC_Ghost.prefab";
+        string path = GhostPrefabPath;
         GameObject prefab = PrefabUtility.SaveAsPrefabAsset(root, path);
         Object.DestroyImmediate(root);
         return prefab.GetComponent<NetworkObject>();
@@ -266,8 +319,8 @@ public static class NCSceneBuilder
     private static void SetupCameraAndLight()
     {
         Camera cam = Camera.main;
-        cam.transform.position = new Vector3(0f, 13f, -18.5f);
-        cam.transform.LookAt(new Vector3(0f, 0.8f, -10f));
+        cam.transform.position = new Vector3(0f, 13f, -20.5f);
+        cam.transform.LookAt(new Vector3(0f, 0.8f, -12f));
         cam.fieldOfView = 50f;
         cam.clearFlags = CameraClearFlags.SolidColor;
         cam.backgroundColor = NCStyle.Hex("0B0F18");
@@ -282,6 +335,88 @@ public static class NCSceneBuilder
         RenderSettings.ambientLight = NCStyle.Hex("4A4060");
     }
 
+    // ───────── 맵 데이터 ─────────
+    //
+    //                  [주방]  (보급방)
+    //                     │
+    //  [서쪽 응접실] [   연회장   ] [창고]
+    //        │             │          │
+    //  [서쪽 갤러리]─[  중앙홀  ]─[동쪽 응접실]
+    //        │             │          │
+    //    [집무실]     [입구 복도]    [서고]
+    //
+    // 방은 1m 격자 위의 사각형이다. 서로 다른 구역의 경계에 벽을 세우고, 출입구 자리만 비운다.
+
+    private enum AreaKind { Entrance, Hall, Combat, Supply }
+
+    private class Area
+    {
+        public string Name;
+        public RectInt Rect; // x = 월드 X, y = 월드 Z
+        public AreaKind Kind;
+        public int[,] Waves; // 차수별 {기본형, 빠른형}
+        public int MaxAlive = 4;
+        public string Decor; // "tables" / "crates" / null
+
+        public Vector3 Center => new Vector3(Rect.center.x, 0f, Rect.center.y);
+    }
+
+    /// <summary>출입구. AlongX = true면 z = Line 인 가로 벽의 x[From, To) 구간, false면 x = Line 인 세로 벽의 z[From, To) 구간.</summary>
+    private struct Door
+    {
+        public bool AlongX;
+        public int Line;
+        public int From;
+        public int To;
+
+        public Door(bool alongX, int line, int from, int to)
+        {
+            AlongX = alongX;
+            Line = line;
+            From = from;
+            To = to;
+        }
+
+        public Vector3 Center => AlongX ? new Vector3((From + To) * 0.5f, 0f, Line) : new Vector3(Line, 0f, (From + To) * 0.5f);
+        public int Width => To - From;
+    }
+
+    private static readonly Area[] Areas =
+    {
+        new Area { Name = "입구 복도", Rect = new RectInt(-2, -14, 4, 8), Kind = AreaKind.Entrance },
+        new Area { Name = "중앙홀", Rect = new RectInt(-6, -6, 12, 12), Kind = AreaKind.Hall },
+        new Area { Name = "서쪽 갤러리", Rect = new RectInt(-16, -6, 10, 12), Kind = AreaKind.Combat, Waves = new[,] { { 3, 1 }, { 3, 2 } } },
+        new Area { Name = "동쪽 응접실", Rect = new RectInt(6, -6, 10, 12), Kind = AreaKind.Combat, Waves = new[,] { { 3, 1 }, { 3, 2 } } },
+        new Area { Name = "연회장", Rect = new RectInt(-7, 6, 14, 10), Kind = AreaKind.Combat, Waves = new[,] { { 4, 2 }, { 4, 3 } }, MaxAlive = 6, Decor = "tables" },
+        new Area { Name = "서쪽 응접실", Rect = new RectInt(-16, 6, 9, 8), Kind = AreaKind.Combat, Waves = new[,] { { 2, 2 }, { 3, 2 } } },
+        new Area { Name = "창고", Rect = new RectInt(7, 6, 9, 8), Kind = AreaKind.Combat, Waves = new[,] { { 3, 1 }, { 2, 3 } }, Decor = "crates" },
+        new Area { Name = "집무실", Rect = new RectInt(-14, -12, 8, 6), Kind = AreaKind.Supply },
+        new Area { Name = "서고", Rect = new RectInt(6, -12, 8, 6), Kind = AreaKind.Supply },
+        new Area { Name = "주방", Rect = new RectInt(-4, 16, 8, 6), Kind = AreaKind.Supply },
+    };
+
+    private static readonly Door[] Doors =
+    {
+        new Door(true, -6, -2, 2),    // 입구 복도 ↔ 중앙홀(전체 개방)
+        new Door(false, -6, -1, 1),   // 중앙홀 ↔ 서쪽 갤러리
+        new Door(false, 6, -1, 1),    // 중앙홀 ↔ 동쪽 응접실
+        new Door(true, 6, -1, 1),     // 중앙홀 ↔ 연회장
+        new Door(true, 6, -12, -10),  // 서쪽 갤러리 ↔ 서쪽 응접실
+        new Door(true, 6, 10, 12),    // 동쪽 응접실 ↔ 창고
+        new Door(true, -6, -11, -9),  // 서쪽 갤러리 ↔ 집무실
+        new Door(true, -6, 9, 11),    // 동쪽 응접실 ↔ 서고
+        new Door(true, 16, -1, 1),    // 연회장 ↔ 주방
+    };
+
+    // 격자 범위(모든 방을 덮는 크기)
+    private const int GridMinX = -18;
+    private const int GridMaxX = 18;
+    private const int GridMinZ = -16;
+    private const int GridMaxZ = 24;
+
+    // 카메라가 내려다보는 각도(이름표가 카메라를 향하도록)
+    private static readonly Quaternion LabelRotation = Quaternion.Euler(57f, 0f, 0f);
+
     private static Transform[] BuildMap(out Transform startZone, out GameObject mapRoot)
     {
         mapRoot = new GameObject("Map");
@@ -293,68 +428,68 @@ public static class NCSceneBuilder
         surface.layerMask = ~(1 << IgnoreRaycastLayer);
         mapRoot.AddComponent<NCNavBaker>();
 
-        Material wood = Mat("NC_FloorWood", NCStyle.Hex("7A5236"));
         Material stone = Mat("NC_FloorStone", NCStyle.Hex("6B5E52"));
-        Material wall = Mat("NC_Wall", NCStyle.Hex("3A2E3E"));
-        Material trim = Mat("NC_WallTrim", NCStyle.Hex("8C6B3E"));
-        Material carpet = Mat("NC_Carpet", NCStyle.Hex("7A2430"));
+        Material wood = Mat("NC_FloorWood", NCStyle.Hex("7A5236"));
+        Material woodDark = Mat("NC_FloorWoodDark", NCStyle.Hex("5C3E2A"));
         Material carpetHall = Mat("NC_CarpetBlue", NCStyle.Hex("2C3F66"));
+        Material carpet = Mat("NC_Carpet", NCStyle.Hex("7A2430"));
         Material table = Mat("NC_Table", NCStyle.Hex("5A3A24"));
         Material cloth = Mat("NC_TableCloth", NCStyle.Hex("E8DFCF"));
 
-        // 바닥(윗면 y = 0)
-        Floor("Floor_Entrance", map, new Vector3(0f, 0f, -10f), new Vector2(3f, 8f), stone);
-        Floor("Floor_Hall", map, new Vector3(0f, 0f, -2f), new Vector2(8f, 8f), stone);
-        Floor("Floor_Banquet", map, new Vector3(0f, 0f, 7f), new Vector2(12f, 10f), wood);
-        Floor("Floor_Storage", map, new Vector3(8f, 0f, 7f), new Vector2(4f, 4f), wood);
-
-        // 벽 (출입구 자리는 비운다)
-        WallZ(map, -1.5f, -14f, -6f, wall, trim);   // 복도 서
-        WallZ(map, 1.5f, -14f, -6f, wall, trim);    // 복도 동
-        WallX(map, -14f, -1.5f, 1.5f, wall, trim);  // 복도 남
-        WallX(map, -6f, -4f, -1.5f, wall, trim);    // 홀 남(서쪽)
-        WallX(map, -6f, 1.5f, 4f, wall, trim);      // 홀 남(동쪽)
-        WallZ(map, -4f, -6f, 2f, wall, trim);       // 홀 서
-        WallZ(map, 4f, -6f, 2f, wall, trim);        // 홀 동
-        WallX(map, 2f, -6f, -1f, wall, trim);       // 연회장 남(서) — 출입구 A: x -1~1
-        WallX(map, 2f, 1f, 6f, wall, trim);         // 연회장 남(동)
-        WallZ(map, -6f, 2f, 12f, wall, trim);       // 연회장 서
-        WallX(map, 12f, -6f, 6f, wall, trim);       // 연회장 북
-        WallZ(map, 6f, 2f, 6f, wall, trim);         // 연회장 동(남) — 출입구 B: z 6~8
-        WallZ(map, 6f, 8f, 12f, wall, trim);        // 연회장 동(북)
-        WallX(map, 5f, 6f, 10f, wall, trim);        // 창고 남
-        WallX(map, 9f, 6f, 10f, wall, trim);        // 창고 북
-        WallZ(map, 10f, 5f, 9f, wall, trim);        // 창고 동
-
-        // 장식(연출 레이어: 길찾기·탄환에 영향 없음)
-        Decor(Box("Carpet_Hall", map, new Vector3(0f, 0.01f, -4f), new Vector3(2.4f, 0.02f, 11.5f), carpetHall, false));
-        Decor(Box("Carpet_Banquet", map, new Vector3(0f, 0.01f, 7f), new Vector3(9f, 0.02f, 7f), carpet, false));
-
-        // 연회장 양옆의 케이크 테이블(엄폐물)
-        foreach (float x in new[] { -4.4f, 4.4f })
+        foreach (Area area in Areas)
         {
-            GameObject t = Box("Table", map, new Vector3(x, 0.4f, 7f), new Vector3(1.1f, 0.8f, 2.2f), table);
-            Box("Cloth", t.transform, new Vector3(0f, 0.52f, 0f), new Vector3(1.05f, 0.06f, 1.05f), cloth, false);
+            Material floor = area.Kind == AreaKind.Combat ? wood : (area.Kind == AreaKind.Supply ? woodDark : stone);
+            Floor("Floor_" + area.Name, map, area.Center, new Vector2(area.Rect.width, area.Rect.height), floor);
+
+            // 방 크기에 맞춘 촛불 조명
+            if (area.Kind == AreaKind.Entrance || area.Kind == AreaKind.Supply)
+            {
+                Candle(map, area.Center + Vector3.up * 2.4f, 7f);
+            }
+            else
+            {
+                float dx = area.Rect.width * 0.28f;
+                float dz = area.Rect.height * 0.28f;
+                foreach (Vector2 c in new[] { new Vector2(-dx, -dz), new Vector2(dx, -dz), new Vector2(-dx, dz), new Vector2(dx, dz) })
+                {
+                    Candle(map, area.Center + new Vector3(c.x, 2.4f, c.y), 8f);
+                }
+            }
+
+            // 보급방 이름표(보급함은 다음 단계)
+            if (area.Kind == AreaKind.Supply)
+            {
+                WorldLabel(area.Name + "\n<size=60%>보급방</size>", map, area.Center + Vector3.up * 2.8f, NCStyle.P2);
+                Box("Crate", map, area.Center + new Vector3(area.Rect.width * 0.3f, 0.35f, area.Rect.height * 0.2f), new Vector3(0.7f, 0.7f, 0.7f), table);
+            }
+
+            if (area.Decor == "tables")
+            {
+                foreach (float side in new[] { -1f, 1f })
+                {
+                    GameObject t = Box("Table", map, area.Center + new Vector3(side * area.Rect.width * 0.32f, 0.4f, 0f), new Vector3(1.1f, 0.8f, 2.2f), table);
+                    Box("Cloth", t.transform, new Vector3(0f, 0.52f, 0f), new Vector3(1.05f, 0.06f, 1.05f), cloth, false);
+                }
+
+                Decor(Box("Carpet", map, area.Center + Vector3.up * 0.01f, new Vector3(area.Rect.width * 0.65f, 0.02f, area.Rect.height * 0.7f), carpet, false));
+            }
+            else if (area.Decor == "crates")
+            {
+                Box("Crate", map, area.Center + new Vector3(-area.Rect.width * 0.3f, 0.4f, area.Rect.height * 0.25f), new Vector3(0.8f, 0.8f, 0.8f), table);
+                Box("Crate", map, area.Center + new Vector3(area.Rect.width * 0.28f, 0.3f, -area.Rect.height * 0.2f), new Vector3(0.6f, 0.6f, 0.6f), table);
+            }
         }
 
-        // 창고의 상자 더미(장식)
-        Box("Crate", map, new Vector3(9.1f, 0.4f, 8.1f), new Vector3(0.8f, 0.8f, 0.8f), table);
-        Box("Crate", map, new Vector3(9.2f, 0.3f, 6.0f), new Vector3(0.6f, 0.6f, 0.6f), table);
+        // 중앙홀 카펫(입구에서 연회장 쪽으로)
+        Decor(Box("Carpet_Hall", map, new Vector3(0f, 0.01f, -4f), new Vector3(2.4f, 0.02f, 19.5f), carpetHall, false));
 
-        // 촛불 조명
-        Candle(map, new Vector3(0f, 2.4f, -10f), 6f);
-        Candle(map, new Vector3(-3f, 2.4f, -2f), 7f);
-        Candle(map, new Vector3(3f, 2.4f, -2f), 7f);
-        Candle(map, new Vector3(-4.5f, 2.4f, 4f), 8f);
-        Candle(map, new Vector3(4.5f, 2.4f, 4f), 8f);
-        Candle(map, new Vector3(-4.5f, 2.4f, 10.5f), 8f);
-        Candle(map, new Vector3(4.5f, 2.4f, 10.5f), 8f);
-        Candle(map, new Vector3(8f, 2.4f, 7f), 5f);
+        BuildWalls(map);
 
         // 중앙홀 시작 영역 표시(빛나는 원)
+        Area hall = System.Array.Find(Areas, a => a.Kind == AreaKind.Hall);
         GameObject zone = new GameObject("StartZone");
         zone.transform.SetParent(map, false);
-        zone.transform.localPosition = new Vector3(0f, 0.03f, -2f);
+        zone.transform.localPosition = hall.Center + Vector3.up * 0.03f;
         float radius = NCBalance.Get.startZoneRadius;
         Shape(PrimitiveType.Cylinder, "Glow", zone.transform, Vector3.zero, new Vector3(radius * 2f, 0.01f, radius * 2f),
             Mat("NC_StartGlow", NCStyle.Hex("58B8EA", 0.18f), transparent: true));
@@ -364,9 +499,104 @@ public static class NCSceneBuilder
         startZone = zone.transform;
 
         // 입구 1P·2P 시작 위치
-        Transform spawn1 = Marker("EntrySpawn_1P", map, new Vector3(-0.7f, 0.1f, -12.5f));
-        Transform spawn2 = Marker("EntrySpawn_2P", map, new Vector3(0.7f, 0.1f, -12.5f));
+        Area entrance = System.Array.Find(Areas, a => a.Kind == AreaKind.Entrance);
+        Vector3 entry = entrance.Center + new Vector3(0f, 0.1f, -1.5f);
+        Transform spawn1 = Marker("EntrySpawn_1P", map, entry + Vector3.left * 0.8f);
+        Transform spawn2 = Marker("EntrySpawn_2P", map, entry + Vector3.right * 0.8f);
         return new[] { spawn1, spawn2 };
+    }
+
+    /// <summary>격자에 방을 칠하고, 서로 다른 구역의 경계(출입구 제외)에 벽을 세운다. 한 줄로 이어지는 벽은 하나로 합친다.</summary>
+    private static void BuildWalls(Transform map)
+    {
+        Material wall = Mat("NC_Wall", NCStyle.Hex("3A2E3E"));
+        Material trim = Mat("NC_WallTrim", NCStyle.Hex("8C6B3E"));
+
+        int width = GridMaxX - GridMinX;
+        int depth = GridMaxZ - GridMinZ;
+        int[,] grid = new int[width, depth];
+
+        for (int x = 0; x < width; x++)
+        {
+            for (int z = 0; z < depth; z++)
+            {
+                grid[x, z] = -1;
+            }
+        }
+
+        for (int i = 0; i < Areas.Length; i++)
+        {
+            RectInt r = Areas[i].Rect;
+            for (int x = r.xMin; x < r.xMax; x++)
+            {
+                for (int z = r.yMin; z < r.yMax; z++)
+                {
+                    grid[x - GridMinX, z - GridMinZ] = i;
+                }
+            }
+        }
+
+        int Label(int x, int z)
+        {
+            int gx = x - GridMinX;
+            int gz = z - GridMinZ;
+            return gx < 0 || gz < 0 || gx >= width || gz >= depth ? -1 : grid[gx, gz];
+        }
+
+        bool IsWall(int a, int b) => a != b && (a >= 0 || b >= 0);
+
+        // 가로 벽: z = line, 셀 (x, line-1)과 (x, line) 사이
+        for (int line = GridMinZ; line <= GridMaxZ; line++)
+        {
+            int start = int.MinValue;
+            for (int x = GridMinX; x <= GridMaxX; x++)
+            {
+                bool wallHere = x < GridMaxX && IsWall(Label(x, line - 1), Label(x, line)) && IsDoorEdge(true, line, x) == false;
+
+                if (wallHere && start == int.MinValue)
+                {
+                    start = x;
+                }
+                else if (wallHere == false && start != int.MinValue)
+                {
+                    WallX(map, line, start, x, wall, trim);
+                    start = int.MinValue;
+                }
+            }
+        }
+
+        // 세로 벽: x = line, 셀 (line-1, z)와 (line, z) 사이
+        for (int line = GridMinX; line <= GridMaxX; line++)
+        {
+            int start = int.MinValue;
+            for (int z = GridMinZ; z <= GridMaxZ; z++)
+            {
+                bool wallHere = z < GridMaxZ && IsWall(Label(line - 1, z), Label(line, z)) && IsDoorEdge(false, line, z) == false;
+
+                if (wallHere && start == int.MinValue)
+                {
+                    start = z;
+                }
+                else if (wallHere == false && start != int.MinValue)
+                {
+                    WallZ(map, line, start, z, wall, trim);
+                    start = int.MinValue;
+                }
+            }
+        }
+    }
+
+    private static bool IsDoorEdge(bool alongX, int line, int cell)
+    {
+        foreach (Door door in Doors)
+        {
+            if (door.AlongX == alongX && door.Line == line && cell >= door.From && cell < door.To)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static void Floor(string name, Transform parent, Vector3 center, Vector2 size, Material material)
@@ -416,57 +646,164 @@ public static class NCSceneBuilder
         return go.transform;
     }
 
-    private static void BuildCombatRoom(NetworkObject ghostPrefab)
+    /// <summary>방 위에 떠 있는 3D 이름표(카메라를 향해 기울임, 연출 레이어).</summary>
+    private static TextMeshPro WorldLabel(string text, Transform parent, Vector3 position, Color color)
     {
-        GameObject roomObject = new GameObject("Room_Banquet");
-        roomObject.transform.position = new Vector3(0f, 0f, 7f);
-        roomObject.AddComponent<NetworkObject>();
-        NCCombatRoom room = roomObject.AddComponent<NCCombatRoom>();
-        Transform r = roomObject.transform;
+        GameObject go = new GameObject("Label");
+        go.transform.SetParent(parent, false);
+        go.transform.position = position;
+        go.transform.rotation = LabelRotation;
+        go.layer = IgnoreRaycastLayer;
 
-        // 방 영역(트리거)
-        GameObject area = new GameObject("Area");
-        area.transform.SetParent(r, false);
-        area.transform.localPosition = new Vector3(0f, 1.5f, 0f);
-        BoxCollider areaBox = area.AddComponent<BoxCollider>();
-        areaBox.isTrigger = true;
-        areaBox.size = new Vector3(11.6f, 3f, 9.6f);
-        area.layer = IgnoreRaycastLayer;
+        TextMeshPro tmp = go.AddComponent<TextMeshPro>();
+        TMP_FontAsset font = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(FontPath);
+        if (font != null)
+        {
+            tmp.font = font;
+        }
 
-        // 잡동사니 더미(상자·책) — 정리 완료 시 사라진다
-        GameObject dummy = new GameObject("Dummy");
-        dummy.transform.SetParent(r, false);
-        dummy.transform.localRotation = Quaternion.Euler(0f, 20f, 0f);
+        tmp.text = text;
+        tmp.fontSize = 7f;
+        tmp.color = color;
+        tmp.alignment = TextAlignmentOptions.Center;
+        tmp.fontStyle = FontStyles.Bold;
+        tmp.rectTransform.sizeDelta = new Vector2(12f, 4f);
+        tmp.textWrappingMode = TextWrappingModes.NoWrap;
+        return tmp;
+    }
+
+    // ───────── 전투방 ─────────
+
+    private static void BuildCombatRooms()
+    {
         Material crate = Mat("NC_Crate", NCStyle.Hex("A0703F"));
         Material bookA = Mat("NC_BookBlue", NCStyle.Hex("3E5E8A"));
         Material bookB = Mat("NC_BookRed", NCStyle.Hex("8A3E46"));
-        Box("Crate", dummy.transform, new Vector3(-0.3f, 0.3f, 0f), new Vector3(0.6f, 0.6f, 0.6f), crate);
-        Box("Crate", dummy.transform, new Vector3(0.35f, 0.25f, 0.2f), new Vector3(0.5f, 0.5f, 0.5f), crate);
-        Box("Crate", dummy.transform, new Vector3(-0.1f, 0.75f, 0.05f), new Vector3(0.4f, 0.3f, 0.4f), crate, false);
-        Box("Books", dummy.transform, new Vector3(0.35f, 0.58f, 0.2f), new Vector3(0.4f, 0.16f, 0.3f), bookA, false);
-        Box("Books", dummy.transform, new Vector3(0.32f, 0.72f, 0.18f), new Vector3(0.36f, 0.12f, 0.28f), bookB, false);
-        Shape(PrimitiveType.Cylinder, "Hint", dummy.transform, new Vector3(0f, 0.02f, 0f), new Vector3(2.2f, 0.005f, 2.2f),
-            Mat("NC_DummyHint", NCStyle.Hex("F2C34E", 0.18f), transparent: true));
-        SetLayerRecursive(dummy, IgnoreRaycastLayer);
-
-        // 봉쇄 장벽 + 봉쇄 영역(출입구 A: 남쪽, 출입구 B: 동쪽)
+        Material hint = Mat("NC_DummyHint", NCStyle.Hex("F2C34E", 0.18f), transparent: true);
         Material barrierMat = Mat("NC_Barrier", NCStyle.Hex("58B8EA", 0.38f), transparent: true);
-        GameObject barrierA = Barrier("Barrier_A", r, new Vector3(0f, 1.5f, -5f), new Vector3(2.1f, 3f, 0.2f), barrierMat);
-        GameObject barrierB = Barrier("Barrier_B", r, new Vector3(6f, 1.5f, 0f), new Vector3(0.2f, 3f, 2.1f), barrierMat);
-        BoxCollider zoneA = SealZone("SealZone_A", r, new Vector3(0f, 1f, -5f), new Vector3(2.2f, 2f, 1.8f));
-        BoxCollider zoneB = SealZone("SealZone_B", r, new Vector3(6f, 1f, 0f), new Vector3(1.8f, 2f, 2.2f));
 
-        // 유령 출현 지점 3곳(출입구에서 먼 구석)
-        Transform s1 = Marker("SpawnPoint_1", r, new Vector3(-4.6f, 0.1f, 3.6f));
-        Transform s2 = Marker("SpawnPoint_2", r, new Vector3(4.4f, 0.1f, 3.7f));
-        Transform s3 = Marker("SpawnPoint_3", r, new Vector3(-4.7f, 0.1f, -3.4f));
+        foreach (Area area in Areas)
+        {
+            if (area.Kind != AreaKind.Combat)
+            {
+                continue;
+            }
 
-        Assign(room, "ghostPrefab", ghostPrefab);
-        Assign(room, "dummy", dummy.transform);
-        Assign(room, "area", areaBox);
-        AssignArray(room, "sealZones", new Object[] { zoneA, zoneB });
-        AssignArray(room, "barriers", new Object[] { barrierA, barrierB });
-        AssignArray(room, "spawnPoints", new Object[] { s1, s2, s3 });
+            GameObject roomObject = new GameObject("Room_" + area.Name);
+            roomObject.transform.position = area.Center;
+            roomObject.AddComponent<NetworkObject>();
+            NCCombatRoom room = roomObject.AddComponent<NCCombatRoom>();
+            Transform r = roomObject.transform;
+
+            // 방 영역(트리거)
+            GameObject areaObject = new GameObject("Area");
+            areaObject.transform.SetParent(r, false);
+            areaObject.transform.localPosition = new Vector3(0f, 1.5f, 0f);
+            areaObject.layer = IgnoreRaycastLayer;
+            BoxCollider areaBox = areaObject.AddComponent<BoxCollider>();
+            areaBox.isTrigger = true;
+            areaBox.size = new Vector3(area.Rect.width - 0.4f, 3f, area.Rect.height - 0.4f);
+
+            // 잡동사니 더미(방 가운데)
+            GameObject dummy = new GameObject("Dummy");
+            dummy.transform.SetParent(r, false);
+            dummy.transform.localRotation = Quaternion.Euler(0f, 20f, 0f);
+            Box("Crate", dummy.transform, new Vector3(-0.3f, 0.3f, 0f), new Vector3(0.6f, 0.6f, 0.6f), crate);
+            Box("Crate", dummy.transform, new Vector3(0.35f, 0.25f, 0.2f), new Vector3(0.5f, 0.5f, 0.5f), crate);
+            Box("Crate", dummy.transform, new Vector3(-0.1f, 0.75f, 0.05f), new Vector3(0.4f, 0.3f, 0.4f), crate, false);
+            Box("Books", dummy.transform, new Vector3(0.35f, 0.58f, 0.2f), new Vector3(0.4f, 0.16f, 0.3f), bookA, false);
+            Box("Books", dummy.transform, new Vector3(0.32f, 0.72f, 0.18f), new Vector3(0.36f, 0.12f, 0.28f), bookB, false);
+            Shape(PrimitiveType.Cylinder, "Hint", dummy.transform, new Vector3(0f, 0.02f, 0f), new Vector3(2.2f, 0.005f, 2.2f), hint);
+            SetLayerRecursive(dummy, IgnoreRaycastLayer);
+
+            // 이 방에 닿은 모든 출입구에 봉쇄 장벽 + 봉쇄 영역
+            List<Object> barriers = new List<Object>();
+            List<Object> zones = new List<Object>();
+            List<Vector3> doorCenters = new List<Vector3>();
+            int index = 0;
+
+            foreach (Door door in Doors)
+            {
+                if (TouchesArea(door, area.Rect) == false)
+                {
+                    continue;
+                }
+
+                Vector3 local = door.Center - area.Center;
+                doorCenters.Add(door.Center);
+
+                Vector3 barrierSize = door.AlongX ? new Vector3(door.Width + 0.1f, 3f, 0.2f) : new Vector3(0.2f, 3f, door.Width + 0.1f);
+                Vector3 zoneSize = door.AlongX ? new Vector3(door.Width + 0.2f, 2f, 1.8f) : new Vector3(1.8f, 2f, door.Width + 0.2f);
+
+                barriers.Add(Barrier("Barrier_" + index, r, local + Vector3.up * 1.5f, barrierSize, barrierMat));
+                zones.Add(SealZone("SealZone_" + index, r, local + Vector3.up, zoneSize));
+                index++;
+            }
+
+            // 출현 지점: 네 모서리(안쪽 1.5m) 중 출입구에서 가장 먼 3곳
+            List<Vector3> corners = new List<Vector3>
+            {
+                new Vector3(area.Rect.xMin + 1.5f, 0f, area.Rect.yMin + 1.5f),
+                new Vector3(area.Rect.xMax - 1.5f, 0f, area.Rect.yMin + 1.5f),
+                new Vector3(area.Rect.xMin + 1.5f, 0f, area.Rect.yMax - 1.5f),
+                new Vector3(area.Rect.xMax - 1.5f, 0f, area.Rect.yMax - 1.5f),
+            };
+
+            corners.Sort((a, b) => NearestDoor(b, doorCenters).CompareTo(NearestDoor(a, doorCenters)));
+
+            Object[] spawnPoints = new Object[3];
+            for (int i = 0; i < 3; i++)
+            {
+                spawnPoints[i] = Marker("SpawnPoint_" + (i + 1), r, corners[i] - area.Center + Vector3.up * 0.1f);
+            }
+
+            TextMeshPro label = WorldLabel(area.Name, r, area.Center + Vector3.up * 2.8f + Vector3.forward * (area.Rect.height * 0.25f), NCStyle.Text);
+
+            Assign(room, "dummy", dummy.transform);
+            Assign(room, "area", areaBox);
+            Assign(room, "label", label);
+            AssignArray(room, "sealZones", zones.ToArray());
+            AssignArray(room, "barriers", barriers.ToArray());
+            AssignArray(room, "spawnPoints", spawnPoints);
+            SetRoomData(room, area);
+        }
+    }
+
+    private static bool TouchesArea(Door door, RectInt rect)
+    {
+        return door.AlongX
+            ? (door.Line == rect.yMin || door.Line == rect.yMax) && door.From >= rect.xMin && door.To <= rect.xMax
+            : (door.Line == rect.xMin || door.Line == rect.xMax) && door.From >= rect.yMin && door.To <= rect.yMax;
+    }
+
+    private static float NearestDoor(Vector3 point, List<Vector3> doors)
+    {
+        float best = float.MaxValue;
+        foreach (Vector3 door in doors)
+        {
+            best = Mathf.Min(best, Vector3.Distance(point, door));
+        }
+
+        return best;
+    }
+
+    private static void SetRoomData(NCCombatRoom room, Area area)
+    {
+        SerializedObject so = new SerializedObject(room);
+        so.FindProperty("roomName").stringValue = area.Name;
+        so.FindProperty("maxAlive").intValue = area.MaxAlive;
+
+        SerializedProperty waves = so.FindProperty("waves");
+        int count = area.Waves.GetLength(0);
+        waves.arraySize = count;
+        for (int i = 0; i < count; i++)
+        {
+            SerializedProperty wave = waves.GetArrayElementAtIndex(i);
+            wave.FindPropertyRelative("basic").intValue = area.Waves[i, 0];
+            wave.FindPropertyRelative("fast").intValue = area.Waves[i, 1];
+        }
+
+        so.ApplyModifiedPropertiesWithoutUndo();
     }
 
     private static GameObject Barrier(string name, Transform parent, Vector3 position, Vector3 size, Material material)
@@ -498,11 +835,10 @@ public static class NCSceneBuilder
         return box;
     }
 
-    private static void BuildSystems(NetworkObject playerPrefab, Transform[] entrySpawns, Transform startZone)
+    private static void BuildSystems(Transform[] entrySpawns, Transform startZone)
     {
         GameObject manager = new GameObject("NetworkManager");
         NCLauncher launcher = manager.AddComponent<NCLauncher>();
-        Assign(launcher, "playerPrefab", playerPrefab);
         AssignArray(launcher, "entrySpawnPoints", entrySpawns);
 
         GameObject session = new GameObject("Session");
