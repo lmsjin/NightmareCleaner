@@ -16,7 +16,8 @@ using UnityEngine.SceneManagement;
 /// 연결 필드는 코드가 직접 넣으므로 MCP 연결 오류가 생기지 않는다. 다시 실행하면 씬을 새로 만든다.
 ///
 /// 맵(1유닛 = 1m, 벽 높이 3m):
-///   입구 복도 → 중앙홀(시작 영역) → 전투방 5개(서쪽 갤러리·서쪽 응접실·동쪽 응접실·연회장·창고) + 보급방 3개(집무실·서고·주방)
+///   아트 맵(Assets/Map/map_dummy_v01.fbx, 180° 회전·0.5배): 현관 → 중앙홀(시작 영역) →
+///   전투방 5개(서쪽 갤러리·서쪽 응접실·동쪽 응접실·연회장·창고) + 보급방 3개(집무실·서고·주방)
 /// </summary>
 public static class NCSceneBuilder
 {
@@ -255,7 +256,7 @@ public static class NCSceneBuilder
         cc.height = 1.8f;
         cc.radius = 0.35f;
         cc.center = new Vector3(0f, 0.9f, 0f);
-        cc.stepOffset = 0.3f;
+        cc.stepOffset = 0.2f;
 
         root.AddComponent<NetworkCharacterController>();
         NCPlayer player = root.AddComponent<NCPlayer>();
@@ -320,8 +321,8 @@ public static class NCSceneBuilder
     private static void SetupCameraAndLight()
     {
         Camera cam = Camera.main;
-        cam.transform.position = new Vector3(0f, 13f, -20.5f);
-        cam.transform.LookAt(new Vector3(0f, 0.8f, -12f));
+        cam.transform.position = new Vector3(0f, 13f, -18f);
+        cam.transform.LookAt(new Vector3(0f, 0.8f, -9.5f));
         cam.fieldOfView = 50f;
         cam.clearFlags = CameraClearFlags.SolidColor;
         cam.backgroundColor = NCStyle.Hex("0B0F18");
@@ -336,84 +337,97 @@ public static class NCSceneBuilder
         RenderSettings.ambientLight = NCStyle.Hex("4A4060");
     }
 
-    // ───────── 맵 데이터 ─────────
+    // ───────── 맵 데이터 (아트 맵 map_dummy_v01 기준) ─────────
     //
-    //                  [주방]  (보급방)
-    //                     │
-    //  [서쪽 응접실] [   연회장   ] [창고]
-    //        │             │          │
-    //  [서쪽 갤러리]─[  중앙홀  ]─[동쪽 응접실]
-    //        │             │          │
-    //    [집무실]     [입구 복도]    [서고]
+    // 아트 맵은 배치도와 남북이 반대로 내보내져 있어 Y축 180° 회전, 기획서 기준(1유닛=1m)에 맞춰 0.5배로 쓴다.
+    // 아래 좌표는 회전·축소한 뒤의 월드 좌표(m)다. (Survey Art Map 측정값에서 계산)
     //
-    // 방은 1m 격자 위의 사각형이다. 서로 다른 구역의 경계에 벽을 세우고, 출입구 자리만 비운다.
+    //   [A-1]   [ 연회장 ]  [주방]  [창고]
+    //       \       │        │      │(동쪽 복도)
+    //  [서쪽 응접실]─[서쪽 갤러리]─[ 중앙홀 ]─[동쪽 응접실]
+    //                                │            │
+    //     [집무실]  [  ]  [ 현관(시작) ]  [  ]  [서고]
 
-    private enum AreaKind { Entrance, Hall, Combat, Supply }
+    private const string ArtMapPath = "Assets/Map/map_dummy_v01.fbx";
+
+    // 아트 맵 배율. 1 = 아트 원래 크기(문 약 4.2m, 벽 약 6.3m).
+    private const float ArtScale = 1f;
+
+    // 아래 방·출입구 표는 0.5배로 놓고 측정한 값이다. 배율을 바꾸면 표가 자동으로 같은 비율로 커진다.
+    private const float MeasuredScale = 0.5f;
+    private static float K => ArtScale / MeasuredScale;
+
+    private enum AreaKind { Entrance, Hall, Combat, Supply, Empty }
 
     private class Area
     {
         public string Name;
-        public RectInt Rect; // x = 월드 X, y = 월드 Z
+        public Rect MeasuredRect; // 0.5배 기준 측정값. x = 월드 X, y = 월드 Z
+        public Rect Rect => new Rect(MeasuredRect.x * K, MeasuredRect.y * K, MeasuredRect.width * K, MeasuredRect.height * K);
         public AreaKind Kind;
         public int[,] Waves; // 차수별 {기본형, 빠른형}
         public int MaxAlive = 4;
-        public string Decor; // "tables" / "crates" / null
 
         public Vector3 Center => new Vector3(Rect.center.x, 0f, Rect.center.y);
     }
 
-    /// <summary>출입구. AlongX = true면 z = Line 인 가로 벽의 x[From, To) 구간, false면 x = Line 인 세로 벽의 z[From, To) 구간.</summary>
+    /// <summary>출입구. 두 구역 사이의 문 자리(문틀 벽 조각 쌍 사이). AlongX = true면 가로 방향(문이 X축으로 벌어짐).</summary>
     private struct Door
     {
+        public string A;
+        public string B;
+        public Vector3 MeasuredCenter; // 0.5배 기준 측정값
         public bool AlongX;
-        public int Line;
-        public int From;
-        public int To;
+        public float MeasuredWidth;
 
-        public Door(bool alongX, int line, int from, int to)
+        public Door(string a, string b, float x, float z, bool alongX, float width = 2.09f)
         {
+            A = a;
+            B = b;
+            MeasuredCenter = new Vector3(x, 0f, z);
             AlongX = alongX;
-            Line = line;
-            From = from;
-            To = to;
+            MeasuredWidth = width;
         }
 
-        public Vector3 Center => AlongX ? new Vector3((From + To) * 0.5f, 0f, Line) : new Vector3(Line, 0f, (From + To) * 0.5f);
-        public int Width => To - From;
+        public Vector3 Center => MeasuredCenter * K;
+        public float Width => MeasuredWidth * K;
+
+        public bool Touches(string area) => A == area || B == area;
     }
 
     private static readonly Area[] Areas =
     {
-        new Area { Name = "입구 복도", Rect = new RectInt(-2, -14, 4, 8), Kind = AreaKind.Entrance },
-        new Area { Name = "중앙홀", Rect = new RectInt(-6, -6, 12, 12), Kind = AreaKind.Hall },
-        new Area { Name = "서쪽 갤러리", Rect = new RectInt(-16, -6, 10, 12), Kind = AreaKind.Combat, Waves = new[,] { { 3, 1 }, { 3, 2 } } },
-        new Area { Name = "동쪽 응접실", Rect = new RectInt(6, -6, 10, 12), Kind = AreaKind.Combat, Waves = new[,] { { 3, 1 }, { 3, 2 } } },
-        new Area { Name = "연회장", Rect = new RectInt(-7, 6, 14, 10), Kind = AreaKind.Combat, Waves = new[,] { { 4, 2 }, { 4, 3 } }, MaxAlive = 6, Decor = "tables" },
-        new Area { Name = "서쪽 응접실", Rect = new RectInt(-16, 6, 9, 8), Kind = AreaKind.Combat, Waves = new[,] { { 2, 2 }, { 3, 2 } } },
-        new Area { Name = "창고", Rect = new RectInt(7, 6, 9, 8), Kind = AreaKind.Combat, Waves = new[,] { { 3, 1 }, { 2, 3 } }, Decor = "crates" },
-        new Area { Name = "집무실", Rect = new RectInt(-14, -12, 8, 6), Kind = AreaKind.Supply },
-        new Area { Name = "서고", Rect = new RectInt(6, -12, 8, 6), Kind = AreaKind.Supply },
-        new Area { Name = "주방", Rect = new RectInt(-4, 16, 8, 6), Kind = AreaKind.Supply },
+        new Area { Name = "현관", MeasuredRect = new Rect(-2.61f, -12.02f, 5.22f, 6.27f), Kind = AreaKind.Entrance },
+        new Area { Name = "중앙홀", MeasuredRect = new Rect(-6.79f, -4.70f, 13.58f, 10.45f), Kind = AreaKind.Hall },
+        new Area { Name = "서쪽 갤러리", MeasuredRect = new Rect(-17.24f, -2.61f, 9.41f, 7.31f), Kind = AreaKind.Combat, Waves = new[,] { { 3, 1 }, { 3, 2 } } },
+        new Area { Name = "서쪽 응접실", MeasuredRect = new Rect(-25.60f, -3.66f, 7.31f, 8.36f), Kind = AreaKind.Combat, Waves = new[,] { { 2, 2 }, { 3, 2 } } },
+        new Area { Name = "동쪽 응접실", MeasuredRect = new Rect(7.84f, -3.66f, 7.31f, 7.31f), Kind = AreaKind.Combat, Waves = new[,] { { 3, 1 }, { 3, 2 } } },
+        new Area { Name = "연회장", MeasuredRect = new Rect(-4.70f, 6.79f, 9.40f, 7.32f), Kind = AreaKind.Combat, Waves = new[,] { { 4, 2 }, { 4, 3 } }, MaxAlive = 6 },
+        new Area { Name = "창고", MeasuredRect = new Rect(14.11f, 1.57f, 7.31f, 9.40f), Kind = AreaKind.Combat, Waves = new[,] { { 3, 1 }, { 2, 3 } } },
+        new Area { Name = "집무실", MeasuredRect = new Rect(-17.24f, -9.93f, 7.31f, 6.27f), Kind = AreaKind.Supply },
+        new Area { Name = "서고", MeasuredRect = new Rect(9.93f, -10.97f, 10.45f, 9.40f), Kind = AreaKind.Supply },
+        new Area { Name = "주방", MeasuredRect = new Rect(5.75f, 4.70f, 7.31f, 6.27f), Kind = AreaKind.Supply },
+        new Area { Name = "A-1", MeasuredRect = new Rect(-14.11f, 5.75f, 8.36f, 6.27f), Kind = AreaKind.Empty },
+        new Area { Name = "현관 서쪽 방", MeasuredRect = new Rect(-8.88f, -9.93f, 5.23f, 6.27f), Kind = AreaKind.Empty },
+        new Area { Name = "현관 동쪽 방", MeasuredRect = new Rect(3.66f, -9.93f, 5.22f, 7.32f), Kind = AreaKind.Empty },
     };
 
     private static readonly Door[] Doors =
     {
-        new Door(true, -6, -2, 2),    // 입구 복도 ↔ 중앙홀(전체 개방)
-        new Door(false, -6, -1, 1),   // 중앙홀 ↔ 서쪽 갤러리
-        new Door(false, 6, -1, 1),    // 중앙홀 ↔ 동쪽 응접실
-        new Door(true, 6, -1, 1),     // 중앙홀 ↔ 연회장
-        new Door(true, 6, -12, -10),  // 서쪽 갤러리 ↔ 서쪽 응접실
-        new Door(true, 6, 10, 12),    // 동쪽 응접실 ↔ 창고
-        new Door(true, -6, -11, -9),  // 서쪽 갤러리 ↔ 집무실
-        new Door(true, -6, 9, 11),    // 동쪽 응접실 ↔ 서고
-        new Door(true, 16, -1, 1),    // 연회장 ↔ 주방
+        new Door("중앙홀", "현관", 0f, -5.22f, true, 3.13f),
+        new Door("중앙홀", "연회장", 0f, 6.27f, true, 3.13f),
+        new Door("중앙홀", "서쪽 갤러리", -7.31f, 0.52f, false),
+        new Door("중앙홀", "동쪽 응접실", 7.31f, 0.52f, false),
+        new Door("서쪽 갤러리", "서쪽 응접실", -17.76f, 0.52f, false),
+        new Door("동쪽 응접실", "서고", 12.02f, -4.18f, true),
+        new Door("동쪽 응접실", "주방", 9.93f, 4.18f, true),
+        new Door("주방", "창고", 13.58f, 6.79f, false),
+        new Door("연회장", "A-1", -5.22f, 8.88f, false),
+        new Door("연회장", "주방", 5.22f, 8.88f, false),
+        new Door("창고", "서고", 18.28f, 1.57f, true),           // 동쪽 복도 북쪽 끝
+        new Door("집무실", "현관 서쪽 방", -9.40f, -5.75f, false),
+        new Door("현관 동쪽 방", "서고", 9.40f, -6.79f, false),
     };
-
-    // 격자 범위(모든 방을 덮는 크기)
-    private const int GridMinX = -18;
-    private const int GridMaxX = 18;
-    private const int GridMinZ = -16;
-    private const int GridMaxZ = 24;
 
     // 카메라가 내려다보는 각도(이름표가 카메라를 향하도록)
     private static readonly Quaternion LabelRotation = Quaternion.Euler(57f, 0f, 0f);
@@ -429,25 +443,12 @@ public static class NCSceneBuilder
         surface.layerMask = ~(1 << IgnoreRaycastLayer);
         mapRoot.AddComponent<NCNavBaker>();
 
-        Material stone = Mat("NC_FloorStone", NCStyle.Hex("6B5E52"));
-        Material wood = Mat("NC_FloorWood", NCStyle.Hex("7A5236"));
-        Material woodDark = Mat("NC_FloorWoodDark", NCStyle.Hex("5C3E2A"));
-        Material carpetHall = Mat("NC_CarpetBlue", NCStyle.Hex("2C3F66"));
-        Material carpet = Mat("NC_Carpet", NCStyle.Hex("7A2430"));
-        Material table = Mat("NC_Table", NCStyle.Hex("5A3A24"));
-        Material cloth = Mat("NC_TableCloth", NCStyle.Hex("E8DFCF"));
+        PlaceArtMap(map);
 
         foreach (Area area in Areas)
         {
-            Material floor = area.Kind == AreaKind.Combat ? wood : (area.Kind == AreaKind.Supply ? woodDark : stone);
-            Floor("Floor_" + area.Name, map, area.Center, new Vector2(area.Rect.width, area.Rect.height), floor);
-
             // 방 크기에 맞춘 촛불 조명
-            if (area.Kind == AreaKind.Entrance || area.Kind == AreaKind.Supply)
-            {
-                Candle(map, area.Center + Vector3.up * 2.4f, 7f);
-            }
-            else
+            if (area.Kind == AreaKind.Combat || area.Kind == AreaKind.Hall)
             {
                 float dx = area.Rect.width * 0.28f;
                 float dz = area.Rect.height * 0.28f;
@@ -456,34 +457,11 @@ public static class NCSceneBuilder
                     Candle(map, area.Center + new Vector3(c.x, 2.4f, c.y), 8f);
                 }
             }
-
-            // 보급방 장식(보급함은 BuildSupplyBoxes가 만든다)
-            if (area.Kind == AreaKind.Supply)
+            else
             {
-                Box("Crate", map, area.Center + new Vector3(area.Rect.width * 0.32f, 0.35f, area.Rect.height * 0.2f), new Vector3(0.7f, 0.7f, 0.7f), table);
-            }
-
-            if (area.Decor == "tables")
-            {
-                foreach (float side in new[] { -1f, 1f })
-                {
-                    GameObject t = Box("Table", map, area.Center + new Vector3(side * area.Rect.width * 0.32f, 0.4f, 0f), new Vector3(1.1f, 0.8f, 2.2f), table);
-                    Box("Cloth", t.transform, new Vector3(0f, 0.52f, 0f), new Vector3(1.05f, 0.06f, 1.05f), cloth, false);
-                }
-
-                Decor(Box("Carpet", map, area.Center + Vector3.up * 0.01f, new Vector3(area.Rect.width * 0.65f, 0.02f, area.Rect.height * 0.7f), carpet, false));
-            }
-            else if (area.Decor == "crates")
-            {
-                Box("Crate", map, area.Center + new Vector3(-area.Rect.width * 0.3f, 0.4f, area.Rect.height * 0.25f), new Vector3(0.8f, 0.8f, 0.8f), table);
-                Box("Crate", map, area.Center + new Vector3(area.Rect.width * 0.28f, 0.3f, -area.Rect.height * 0.2f), new Vector3(0.6f, 0.6f, 0.6f), table);
+                Candle(map, area.Center + Vector3.up * 2.4f, 7f);
             }
         }
-
-        // 중앙홀 카펫(입구에서 연회장 쪽으로)
-        Decor(Box("Carpet_Hall", map, new Vector3(0f, 0.01f, -4f), new Vector3(2.4f, 0.02f, 19.5f), carpetHall, false));
-
-        BuildWalls(map);
 
         // 중앙홀 시작 영역 표시(빛나는 원)
         Area hall = System.Array.Find(Areas, a => a.Kind == AreaKind.Hall);
@@ -498,7 +476,7 @@ public static class NCSceneBuilder
         SetLayerRecursive(zone, IgnoreRaycastLayer);
         startZone = zone.transform;
 
-        // 입구 1P·2P 시작 위치
+        // 현관 1P·2P 시작 위치(시작지점)
         Area entrance = System.Array.Find(Areas, a => a.Kind == AreaKind.Entrance);
         Vector3 entry = entrance.Center + new Vector3(0f, 0.1f, -1.5f);
         Transform spawn1 = Marker("EntrySpawn_1P", map, entry + Vector3.left * 0.8f);
@@ -506,118 +484,71 @@ public static class NCSceneBuilder
         return new[] { spawn1, spawn2 };
     }
 
-    /// <summary>격자에 방을 칠하고, 서로 다른 구역의 경계(출입구 제외)에 벽을 세운다. 한 줄로 이어지는 벽은 하나로 합친다.</summary>
-    private static void BuildWalls(Transform map)
+    /// <summary>
+    /// 아트 맵을 놓는다: 180° 회전 · 0.5배 · 바닥 높이를 0에 맞춤 · 모든 조각에 메시 콜라이더 · 임시 재질.
+    /// (아트 담당이 재질을 입히면 재질 지정 부분만 빼면 된다)
+    /// </summary>
+    private static void PlaceArtMap(Transform map)
     {
+        GameObject asset = AssetDatabase.LoadAssetAtPath<GameObject>(ArtMapPath);
+        if (asset == null)
+        {
+            Debug.LogError("[NCSceneBuilder] 아트 맵을 찾지 못했습니다: " + ArtMapPath);
+            return;
+        }
+
+        GameObject art = (GameObject)PrefabUtility.InstantiatePrefab(asset, map);
+        PrefabUtility.UnpackPrefabInstance(art, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+        art.name = "ArtMap";
+        art.transform.localPosition = Vector3.zero;
+        art.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
+        art.transform.localScale = Vector3.one * ArtScale;
+
+        // 바닥(plan_*) 윗면이 y = 0이 되도록 내린다.
+        float floorY = float.MaxValue;
+        foreach (Renderer r in art.GetComponentsInChildren<Renderer>())
+        {
+            if (r.name.StartsWith("plan"))
+            {
+                floorY = Mathf.Min(floorY, r.bounds.max.y);
+            }
+        }
+
+        if (floorY < float.MaxValue)
+        {
+            art.transform.localPosition = Vector3.down * floorY;
+        }
+
+        Material floor = Mat("NC_FloorWood", NCStyle.Hex("7A5236"));
+        Material ground = Mat("NC_FloorStone", NCStyle.Hex("4A4038"));
         Material wall = Mat("NC_Wall", NCStyle.Hex("3A2E3E"));
-        Material trim = Mat("NC_WallTrim", NCStyle.Hex("8C6B3E"));
 
-        int width = GridMaxX - GridMinX;
-        int depth = GridMaxZ - GridMinZ;
-        int[,] grid = new int[width, depth];
-
-        for (int x = 0; x < width; x++)
+        foreach (MeshFilter filter in art.GetComponentsInChildren<MeshFilter>())
         {
-            for (int z = 0; z < depth; z++)
+            if (filter.sharedMesh == null)
             {
-                grid[x, z] = -1;
+                continue;
             }
-        }
 
-        for (int i = 0; i < Areas.Length; i++)
-        {
-            RectInt r = Areas[i].Rect;
-            for (int x = r.xMin; x < r.xMax; x++)
+            MeshCollider collider = filter.gameObject.AddComponent<MeshCollider>();
+            collider.sharedMesh = filter.sharedMesh;
+
+            Renderer renderer = filter.GetComponent<Renderer>();
+            if (renderer == null)
             {
-                for (int z = r.yMin; z < r.yMax; z++)
-                {
-                    grid[x - GridMinX, z - GridMinZ] = i;
-                }
+                continue;
             }
-        }
 
-        int Label(int x, int z)
-        {
-            int gx = x - GridMinX;
-            int gz = z - GridMinZ;
-            return gx < 0 || gz < 0 || gx >= width || gz >= depth ? -1 : grid[gx, gz];
-        }
-
-        bool IsWall(int a, int b) => a != b && (a >= 0 || b >= 0);
-
-        // 가로 벽: z = line, 셀 (x, line-1)과 (x, line) 사이
-        for (int line = GridMinZ; line <= GridMaxZ; line++)
-        {
-            int start = int.MinValue;
-            for (int x = GridMinX; x <= GridMaxX; x++)
+            string name = filter.name;
+            Material material = name.StartsWith("plan") ? floor : (name == "pPlane14" ? ground : wall);
+            Material[] materials = renderer.sharedMaterials;
+            for (int i = 0; i < materials.Length; i++)
             {
-                bool wallHere = x < GridMaxX && IsWall(Label(x, line - 1), Label(x, line)) && IsDoorEdge(true, line, x) == false;
-
-                if (wallHere && start == int.MinValue)
-                {
-                    start = x;
-                }
-                else if (wallHere == false && start != int.MinValue)
-                {
-                    WallX(map, line, start, x, wall, trim);
-                    start = int.MinValue;
-                }
+                materials[i] = material;
             }
+
+            renderer.sharedMaterials = materials;
         }
-
-        // 세로 벽: x = line, 셀 (line-1, z)와 (line, z) 사이
-        for (int line = GridMinX; line <= GridMaxX; line++)
-        {
-            int start = int.MinValue;
-            for (int z = GridMinZ; z <= GridMaxZ; z++)
-            {
-                bool wallHere = z < GridMaxZ && IsWall(Label(line - 1, z), Label(line, z)) && IsDoorEdge(false, line, z) == false;
-
-                if (wallHere && start == int.MinValue)
-                {
-                    start = z;
-                }
-                else if (wallHere == false && start != int.MinValue)
-                {
-                    WallZ(map, line, start, z, wall, trim);
-                    start = int.MinValue;
-                }
-            }
-        }
-    }
-
-    private static bool IsDoorEdge(bool alongX, int line, int cell)
-    {
-        foreach (Door door in Doors)
-        {
-            if (door.AlongX == alongX && door.Line == line && cell >= door.From && cell < door.To)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static void Floor(string name, Transform parent, Vector3 center, Vector2 size, Material material)
-    {
-        Box(name, parent, center + Vector3.down * 0.1f, new Vector3(size.x, 0.2f, size.y), material);
-    }
-
-    /// <summary>X축 방향 벽(z 고정).</summary>
-    private static void WallX(Transform parent, float z, float x0, float x1, Material wall, Material trim)
-    {
-        float length = x1 - x0;
-        GameObject w = Box("Wall", parent, new Vector3((x0 + x1) * 0.5f, WallHeight * 0.5f, z), new Vector3(length + WallThickness, WallHeight, WallThickness), wall);
-        Box("Trim", w.transform, new Vector3(0f, 0.5f + 0.02f, 0f), new Vector3(1.002f, 0.04f / WallHeight, 1.1f), trim, false);
-    }
-
-    /// <summary>Z축 방향 벽(x 고정).</summary>
-    private static void WallZ(Transform parent, float x, float z0, float z1, Material wall, Material trim)
-    {
-        float length = z1 - z0;
-        GameObject w = Box("Wall", parent, new Vector3(x, WallHeight * 0.5f, (z0 + z1) * 0.5f), new Vector3(WallThickness, WallHeight, length + WallThickness), wall);
-        Box("Trim", w.transform, new Vector3(0f, 0.5f + 0.02f, 0f), new Vector3(1.1f, 0.04f / WallHeight, 1.002f), trim, false);
     }
 
     private static void Decor(GameObject go)
@@ -775,8 +706,13 @@ public static class NCSceneBuilder
             GameObject dummy = new GameObject("Dummy");
             dummy.transform.SetParent(r, false);
             dummy.transform.localRotation = Quaternion.Euler(0f, 20f, 0f);
-            Box("Crate", dummy.transform, new Vector3(-0.3f, 0.3f, 0f), new Vector3(0.6f, 0.6f, 0.6f), crate);
-            Box("Crate", dummy.transform, new Vector3(0.35f, 0.25f, 0.2f), new Vector3(0.5f, 0.5f, 0.5f), crate);
+            Box("Crate", dummy.transform, new Vector3(-0.3f, 0.3f, 0f), new Vector3(0.6f, 0.6f, 0.6f), crate, false);
+            Box("Crate", dummy.transform, new Vector3(0.35f, 0.25f, 0.2f), new Vector3(0.5f, 0.5f, 0.5f), crate, false);
+
+            // 상자 하나하나에 콜라이더를 두면 캐릭터가 턱처럼 올라탄다 → 더미 전체를 감싸는 높은 벽 하나로 막는다.
+            BoxCollider block = dummy.AddComponent<BoxCollider>();
+            block.center = new Vector3(0f, 1f, 0.1f);
+            block.size = new Vector3(1.4f, 2f, 1f);
             Box("Crate", dummy.transform, new Vector3(-0.1f, 0.75f, 0.05f), new Vector3(0.4f, 0.3f, 0.4f), crate, false);
             Box("Books", dummy.transform, new Vector3(0.35f, 0.58f, 0.2f), new Vector3(0.4f, 0.16f, 0.3f), bookA, false);
             Box("Books", dummy.transform, new Vector3(0.32f, 0.72f, 0.18f), new Vector3(0.36f, 0.12f, 0.28f), bookB, false);
@@ -791,7 +727,7 @@ public static class NCSceneBuilder
 
             foreach (Door door in Doors)
             {
-                if (TouchesArea(door, area.Rect) == false)
+                if (door.Touches(area.Name) == false)
                 {
                     continue;
                 }
@@ -799,21 +735,25 @@ public static class NCSceneBuilder
                 Vector3 local = door.Center - area.Center;
                 doorCenters.Add(door.Center);
 
-                Vector3 barrierSize = door.AlongX ? new Vector3(door.Width + 0.1f, 3f, 0.2f) : new Vector3(0.2f, 3f, door.Width + 0.1f);
+                // 장벽 높이는 벽 높이(약 3.1m × 배율)에 맞춘다.
+                float barrierHeight = 3.2f * K;
+                Vector3 barrierSize = door.AlongX ? new Vector3(door.Width + 0.1f, barrierHeight, 0.2f) : new Vector3(0.2f, barrierHeight, door.Width + 0.1f);
                 Vector3 zoneSize = door.AlongX ? new Vector3(door.Width + 0.2f, 2f, 1.8f) : new Vector3(1.8f, 2f, door.Width + 0.2f);
 
-                barriers.Add(Barrier("Barrier_" + index, r, local + Vector3.up * 1.5f, barrierSize, barrierMat));
+                barriers.Add(Barrier("Barrier_" + index, r, local + Vector3.up * (barrierHeight * 0.5f), barrierSize, barrierMat));
                 zones.Add(SealZone("SealZone_" + index, r, local + Vector3.up, zoneSize));
                 index++;
             }
 
-            // 출현 지점: 네 모서리(안쪽 1.5m) 중 출입구에서 가장 먼 3곳
+            // 출현 지점: 방 안쪽 네 점(팔각형 방의 모서리 벽을 피하도록 중심에서 28%) 중 출입구에서 가장 먼 3곳
+            float sx = area.Rect.width * 0.28f;
+            float sz = area.Rect.height * 0.28f;
             List<Vector3> corners = new List<Vector3>
             {
-                new Vector3(area.Rect.xMin + 1.5f, 0f, area.Rect.yMin + 1.5f),
-                new Vector3(area.Rect.xMax - 1.5f, 0f, area.Rect.yMin + 1.5f),
-                new Vector3(area.Rect.xMin + 1.5f, 0f, area.Rect.yMax - 1.5f),
-                new Vector3(area.Rect.xMax - 1.5f, 0f, area.Rect.yMax - 1.5f),
+                area.Center + new Vector3(-sx, 0f, -sz),
+                area.Center + new Vector3(sx, 0f, -sz),
+                area.Center + new Vector3(-sx, 0f, sz),
+                area.Center + new Vector3(sx, 0f, sz),
             };
 
             corners.Sort((a, b) => NearestDoor(b, doorCenters).CompareTo(NearestDoor(a, doorCenters)));
@@ -834,13 +774,6 @@ public static class NCSceneBuilder
             AssignArray(room, "spawnPoints", spawnPoints);
             SetRoomData(room, area);
         }
-    }
-
-    private static bool TouchesArea(Door door, RectInt rect)
-    {
-        return door.AlongX
-            ? (door.Line == rect.yMin || door.Line == rect.yMax) && door.From >= rect.xMin && door.To <= rect.xMax
-            : (door.Line == rect.xMin || door.Line == rect.xMax) && door.From >= rect.yMin && door.To <= rect.yMax;
     }
 
     private static float NearestDoor(Vector3 point, List<Vector3> doors)

@@ -118,17 +118,33 @@ public class NCPlayer : NetworkBehaviour
             IsMoving = false;
             IsFiring = false;
             _controller.Move(Vector3.zero); // 중력만 적용
+            ClampUpwardVelocity();
             return;
         }
 
         Vector3 direction = new Vector3(input.Move.x, 0f, input.Move.y);
         _controller.Move(direction);
+        ClampUpwardVelocity();
 
         HoldingInteract = input.IsDown(NCButton.Interact);
         IsMoving = direction.sqrMagnitude > 0.01f;
         IsFiring = input.IsDown(NCButton.Fire);
 
         FaceAim(input.AimPoint);
+    }
+
+    /// <summary>
+    /// 이 게임엔 점프가 없다. 턱·물체 모서리를 밟아 순간 올라간 높이가 위쪽 속도로 남으면
+    /// (NetworkCharacterController는 이동량으로 속도를 다시 계산한다) 다음 Tick부터 하늘로 솟구친다 → 위쪽 속도를 지운다.
+    /// </summary>
+    private void ClampUpwardVelocity()
+    {
+        Vector3 velocity = _controller.Velocity;
+        if (velocity.y > 0f)
+        {
+            velocity.y = 0f;
+            _controller.Velocity = velocity;
+        }
     }
 
     private void FaceAim(Vector3 aimPoint)

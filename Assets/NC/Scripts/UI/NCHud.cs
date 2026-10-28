@@ -87,6 +87,14 @@ public class NCHud
 
     private static NCHud _instance;
 
+    // 미니맵 · 화면 밖 동료 방향 표식
+    private NCMinimap _minimap;
+    private RectTransform _mateArrow;
+    private RectTransform _mateArrowHead;
+    private TextMeshProUGUI _mateArrowLabel;
+    private Image _mateArrowBack;
+    private int _shownArrowState = -1;
+
     // 알림 감지용(이전 프레임 값)
     private readonly System.Collections.Generic.Dictionary<NCCombatRoom, NCRoomState> _lastRoomStates =
         new System.Collections.Generic.Dictionary<NCCombatRoom, NCRoomState>();
@@ -121,7 +129,8 @@ public class NCHud
 
         // 방 코드(입구에서만, 오른쪽 위)
         RectTransform code = NCUiKit.NewPanel("RoomCode", root, deep: true);
-        NCUiKit.Place(code, new Vector2(1f, 1f), new Vector2(-NCStyle.Margin, -NCStyle.Margin), new Vector2(260f, 52f));
+        // 미니맵(오른쪽 위) 아래에 둔다.
+        NCUiKit.Place(code, new Vector2(1f, 1f), new Vector2(-NCStyle.Margin, -NCStyle.Margin - 246f - NCStyle.Gap), new Vector2(260f, 52f));
         _roomCodeText = NCUiKit.NewText("Text", code, "방 코드", 22f, NCStyle.Text);
         NCUiKit.Stretch(_roomCodeText.rectTransform);
         _roomCode = code.gameObject;
@@ -168,6 +177,9 @@ public class NCHud
         NCUiKit.Place(_reloadBack, new Vector2(0.5f, 0f), new Vector2(0f, -14f), new Vector2(280f, 12f));
 
         BuildChargePanel(root);
+
+        _minimap = new NCMinimap(root);
+        BuildMateArrow(root);
 
         // ── 상호작용 안내 ──
         _prompt = NCUiKit.NewPanel("Prompt", root, deep: true);
@@ -274,6 +286,97 @@ public class NCHud
         NCUiKit.SetBar(_chargeFill, gun.OverchargeRatio);
     }
 
+    // ───────── 화면 밖 동료 방향 표식(UI 기획서 11장) ─────────
+
+    private void BuildMateArrow(RectTransform root)
+    {
+        _mateArrow = NCUiKit.NewRect("MateArrow", root);
+        _mateArrow.anchorMin = _mateArrow.anchorMax = new Vector2(0.5f, 0.5f);
+        _mateArrow.sizeDelta = new Vector2(76f, 76f);
+
+        _mateArrowBack = NCUiKit.NewImage("Back", _mateArrow, NCUiKit.CircleSprite, NCStyle.PanelDeep);
+        NCUiKit.Place(_mateArrowBack.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(54f, 54f));
+
+        // 원 둘레를 도는 삼각형이 동료 쪽을 가리킨다.
+        _mateArrowHead = NCUiKit.NewRect("HeadPivot", _mateArrow);
+        NCUiKit.Place(_mateArrowHead, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(76f, 76f));
+        TextMeshProUGUI head = NCUiKit.NewText("Head", _mateArrowHead, "▲", 22f, NCStyle.P2);
+        NCUiKit.Place(head.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, 4f), new Vector2(30f, 26f));
+
+        _mateArrowLabel = NCUiKit.NewText("Label", _mateArrow, "2P", 18f, NCStyle.P2, style: FontStyles.Bold);
+        NCUiKit.Place(_mateArrowLabel.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(54f, 54f));
+
+        _mateArrow.gameObject.SetActive(false);
+    }
+
+    private void TickMateArrow(NCPlayer me)
+    {
+        NCPlayer mate = null;
+        foreach (NCPlayer player in NCPlayer.All)
+        {
+            if (player != me && player.Object != null && player.Object.IsValid)
+            {
+                mate = player;
+            }
+        }
+
+        Camera cam = Camera.main;
+        if (mate == null || me == null || cam == null)
+        {
+            _mateArrow.gameObject.SetActive(false);
+            return;
+        }
+
+        Vector3 screen = cam.WorldToScreenPoint(mate.transform.position + Vector3.up);
+        bool behind = screen.z < 0f;
+        if (behind)
+        {
+            screen = -screen;
+        }
+
+        float margin = 40f;
+        bool onScreen = behind == false && screen.x > margin && screen.x < Screen.width - margin && screen.y > margin && screen.y < Screen.height - margin;
+        _mateArrow.gameObject.SetActive(onScreen == false);
+
+        if (onScreen)
+        {
+            return;
+        }
+
+        // 화면 중심 → 동료 방향으로, 안전 영역 가장자리에 붙인다.
+        Vector2 center = new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
+        Vector2 dir = ((Vector2)screen - center).normalized;
+        if (dir.sqrMagnitude < 0.001f)
+        {
+            dir = Vector2.up;
+        }
+
+        Vector2 half = _canvas.rect.size * 0.5f - new Vector2(90f, 90f);
+        float scale = Mathf.Min(Mathf.Abs(half.x / Mathf.Max(0.001f, Mathf.Abs(dir.x))), Mathf.Abs(half.y / Mathf.Max(0.001f, Mathf.Abs(dir.y))));
+        _mateArrow.anchoredPosition = dir * scale;
+        _mateArrowHead.localRotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg - 90f);
+
+        // 다운된 동료는 붉게 "구조"로 알린다.
+        int state = mate.Health.IsDown ? 1 : 0;
+        if (state != _shownArrowState || _mateArrowLabel.color.a <= 0f)
+        {
+            _shownArrowState = state;
+            Color color = state == 1 ? NCStyle.Danger : mate.SlotColor;
+            _mateArrowLabel.text = state == 1 ? "구조" : mate.SlotLabel;
+            _mateArrowLabel.color = color;
+            _mateArrowHead.GetComponentInChildren<TextMeshProUGUI>().color = color;
+        }
+
+        if (state == 1)
+        {
+            _mateArrowBack.color = Color.Lerp(NCStyle.PanelDeep, NCStyle.Danger, Mathf.PingPong(Time.time * 3f, 1f) * 0.6f);
+        }
+        else
+        {
+            _mateArrowBack.color = NCStyle.PanelDeep;
+        }
+    }
+
     /// <summary>다른 스크립트가 이 PC 화면에 잠깐 안내를 띄울 때(예: 보급함 "체력이 충분합니다").</summary>
     public static void Notify(string text, Color accent)
     {
@@ -338,6 +441,8 @@ public class NCHud
         TickHealth(me);
         TickAmmo(me);
         TickCharge(me);
+        _minimap.Tick(me);
+        TickMateArrow(me);
         TickPrompt(me, playing);
         TickDown(me);
         DetectEvents(session, me, playing);

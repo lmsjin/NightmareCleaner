@@ -12,5 +12,8 @@ public class NCNavBaker : MonoBehaviour
     private void Awake()
     {
         GetComponent<NavMeshSurface>().BuildNavMesh();
+
+        // 플레이어·유령이 생기기 전에 미니맵용 맵 윤곽을 한 번 찍어 둔다.
+        NCMapSnapshot.Capture(transform);
     }
 }

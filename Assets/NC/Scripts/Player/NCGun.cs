@@ -168,7 +168,10 @@ public class NCGun : NetworkBehaviour
         if (IsReloading == false && IsOvercharged == false)
         {
             bool manual = input.IsDown(NCButton.Reload) && Ammo < MagazineSize;
-            bool auto = balance.autoReloadWhenEmpty && Ammo <= 0;
+
+            // 탄창이 비었을 때: 좌클릭을 누르고 있으면(연사를 이어가려는 것) 자동으로 재장전한다.
+            // 버튼 없이도 자동 재장전할지는 NCBalance.autoReloadWhenEmpty 설정을 따른다.
+            bool auto = Ammo <= 0 && (input.IsDown(NCButton.Fire) || balance.autoReloadWhenEmpty);
 
             if (manual || auto)
             {

@@ -126,6 +126,9 @@ public class NCCombatRoom : NetworkBehaviour
         All.Remove(this);
     }
 
+    /// <summary>방 영역(미니맵 표시용).</summary>
+    public Bounds AreaBounds => area != null ? area.bounds : new Bounds(transform.position, Vector3.one * 4f);
+
     public bool ContainsPoint(Vector3 position)
     {
         return area != null && area.bounds.Contains(new Vector3(position.x, area.bounds.center.y, position.z));
