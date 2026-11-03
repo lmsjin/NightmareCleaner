@@ -348,7 +348,11 @@ public static class NCSceneBuilder
     //                                │            │
     //     [집무실]  [  ]  [ 현관(시작) ]  [  ]  [서고]
 
-    private const string ArtMapPath = "Assets/Map/map_dummy_v01.fbx";
+    // 최종 배치안(가구 포함, 벽 높이 약 4m). 배치는 map_dummy_v01 과 같다(Survey Art Map 으로 확인).
+    private const string ArtMapPath = "Assets/Map/nightmare_map_v01.fbx";
+
+    // 아트 벽 높이(배치 후 측정). 봉쇄 장벽 높이에 쓴다.
+    private static float _artWallHeight = 4f;
 
     // 아트 맵 배율. 1 = 아트 원래 크기(문 약 4.2m, 벽 약 6.3m).
     private const float ArtScale = 1f;
@@ -445,6 +449,9 @@ public static class NCSceneBuilder
 
         PlaceArtMap(map);
 
+        // 이후 놓는 오브젝트(정리 더미·보급함·출현 지점)가 가구와 겹치는지 검사할 수 있게 물리 상태를 갱신한다.
+        Physics.SyncTransforms();
+
         foreach (Area area in Areas)
         {
             // 방 크기에 맞춘 촛불 조명
@@ -519,6 +526,18 @@ public static class NCSceneBuilder
             art.transform.localPosition = Vector3.down * floorY;
         }
 
+        // 벽 높이를 재 둔다(봉쇄 장벽을 벽 높이에 맞추기 위해).
+        float wallTop = 0f;
+        foreach (Renderer r in art.GetComponentsInChildren<Renderer>())
+        {
+            if (r.name.StartsWith("wall"))
+            {
+                wallTop = Mathf.Max(wallTop, r.bounds.max.y);
+            }
+        }
+
+        _artWallHeight = wallTop > 0.5f ? wallTop : 4f;
+
         Material floor = Mat("NC_FloorWood", NCStyle.Hex("7A5236"));
         Material ground = Mat("NC_FloorStone", NCStyle.Hex("4A4038"));
         Material wall = Mat("NC_Wall", NCStyle.Hex("3A2E3E"));
@@ -539,8 +558,17 @@ public static class NCSceneBuilder
                 continue;
             }
 
+            // 가구(바닥·벽이 아닌 메시)는 아트 원본 재질을 그대로 쓴다.
             string name = filter.name;
-            Material material = name.StartsWith("plan") ? floor : (name == "pPlane14" ? ground : wall);
+            bool isFloor = name.StartsWith("plan");
+            bool isGround = name == "pPlane14";
+            bool isWall = name.StartsWith("wall") || name == "pPlane13";
+            if (isFloor == false && isGround == false && isWall == false)
+            {
+                continue;
+            }
+
+            Material material = isFloor ? floor : (isGround ? ground : wall);
             Material[] materials = renderer.sharedMaterials;
             for (int i = 0; i < materials.Length; i++)
             {
@@ -628,7 +656,8 @@ public static class NCSceneBuilder
             }
 
             GameObject boxObject = new GameObject("Supply_" + boxName);
-            boxObject.transform.position = area.Center + new Vector3(-area.Rect.width * 0.15f, 0f, 0f);
+            Vector3 wanted = area.Center + new Vector3(-area.Rect.width * 0.15f, 0f, 0f);
+            boxObject.transform.position = FindFreeSpot(wanted, area.Center, new Vector3(0.8f, 0.5f, 0.6f));
             boxObject.AddComponent<NetworkObject>();
             NCSupplyBox box = boxObject.AddComponent<NCSupplyBox>();
             Transform b = boxObject.transform;
@@ -705,6 +734,7 @@ public static class NCSceneBuilder
             // 잡동사니 더미(방 가운데)
             GameObject dummy = new GameObject("Dummy");
             dummy.transform.SetParent(r, false);
+            dummy.transform.position = FindFreeSpot(area.Center, area.Center, new Vector3(1.2f, 0.8f, 1.2f));
             dummy.transform.localRotation = Quaternion.Euler(0f, 20f, 0f);
             Box("Crate", dummy.transform, new Vector3(-0.3f, 0.3f, 0f), new Vector3(0.6f, 0.6f, 0.6f), crate, false);
             Box("Crate", dummy.transform, new Vector3(0.35f, 0.25f, 0.2f), new Vector3(0.5f, 0.5f, 0.5f), crate, false);
@@ -736,7 +766,7 @@ public static class NCSceneBuilder
                 doorCenters.Add(door.Center);
 
                 // 장벽 높이는 벽 높이(약 3.1m × 배율)에 맞춘다.
-                float barrierHeight = 3.2f * K;
+                float barrierHeight = _artWallHeight + 0.1f;
                 Vector3 barrierSize = door.AlongX ? new Vector3(door.Width + 0.1f, barrierHeight, 0.2f) : new Vector3(0.2f, barrierHeight, door.Width + 0.1f);
                 Vector3 zoneSize = door.AlongX ? new Vector3(door.Width + 0.2f, 2f, 1.8f) : new Vector3(1.8f, 2f, door.Width + 0.2f);
 
@@ -761,7 +791,8 @@ public static class NCSceneBuilder
             Object[] spawnPoints = new Object[3];
             for (int i = 0; i < 3; i++)
             {
-                spawnPoints[i] = Marker("SpawnPoint_" + (i + 1), r, corners[i] - area.Center + Vector3.up * 0.1f);
+                Vector3 spot = FindFreeSpot(corners[i], area.Center, new Vector3(0.6f, 0.6f, 0.6f));
+                spawnPoints[i] = Marker("SpawnPoint_" + (i + 1), r, spot - area.Center + Vector3.up * 0.1f);
             }
 
             TextMeshPro label = WorldLabel(area.Name, r, area.Center + Vector3.up * 2.8f + Vector3.forward * (area.Rect.height * 0.25f), NCStyle.Text);
@@ -774,6 +805,51 @@ public static class NCSceneBuilder
             AssignArray(room, "spawnPoints", spawnPoints);
             SetRoomData(room, area);
         }
+    }
+
+    /// <summary>
+    /// 원하는 자리에 가구·벽이 있으면 방 중심 쪽으로(그래도 안 되면 주변으로) 조금씩 옮겨 빈 바닥을 찾는다.
+    /// halfExtents 는 놓을 물건 크기의 절반(높이 포함). 바닥은 검사하지 않도록 바닥 위 10cm부터 검사한다.
+    /// </summary>
+    private static Vector3 FindFreeSpot(Vector3 wanted, Vector3 roomCenter, Vector3 halfExtents)
+    {
+        bool IsFree(Vector3 p)
+        {
+            Vector3 center = new Vector3(p.x, 0.1f + halfExtents.y, p.z);
+            return Physics.CheckBox(center, halfExtents, Quaternion.identity, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore) == false;
+        }
+
+        if (IsFree(wanted))
+        {
+            return wanted;
+        }
+
+        // 방 중심 쪽으로 당겨 본다.
+        for (float t = 0.15f; t <= 1f; t += 0.15f)
+        {
+            Vector3 p = Vector3.Lerp(wanted, roomCenter, t);
+            if (IsFree(p))
+            {
+                return p;
+            }
+        }
+
+        // 주변을 원형으로 넓혀 가며 찾는다.
+        for (float radius = 0.5f; radius <= 4f; radius += 0.5f)
+        {
+            for (int i = 0; i < 12; i++)
+            {
+                float angle = i * Mathf.PI * 2f / 12f;
+                Vector3 p = wanted + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * radius;
+                if (IsFree(p))
+                {
+                    return p;
+                }
+            }
+        }
+
+        Debug.LogWarning($"[NCSceneBuilder] {wanted} 근처에 빈 바닥을 찾지 못했습니다(가구와 겹칠 수 있음).");
+        return wanted;
     }
 
     private static float NearestDoor(Vector3 point, List<Vector3> doors)
