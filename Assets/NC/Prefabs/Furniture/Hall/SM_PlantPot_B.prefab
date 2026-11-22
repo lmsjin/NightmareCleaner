@@ -52,8 +52,8 @@ BoxCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
-  m_Size: {x: 0.7828827, y: 1.3229169, z: 0.8041153}
-  m_Center: {x: 36.563232, y: 0.39606002, z: -10.972438}
+  m_Size: {x: 0.007828781, y: 0.013229169, z: 0.008041158}
+  m_Center: {x: -0.0011300948, y: 0.0037645004, z: 0.000024024397}
 --- !u!1001 &1056306278316265339
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -63,16 +63,28 @@ PrefabInstance:
     m_TransformParent: {fileID: 2086141437420168068}
     m_Modifications:
     - target: {fileID: -8679921383154817045, guid: b7aefd9aafe383f46bfe0c078c7e014d, type: 3}
+      propertyPath: m_LocalScale.x
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: b7aefd9aafe383f46bfe0c078c7e014d, type: 3}
+      propertyPath: m_LocalScale.y
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: b7aefd9aafe383f46bfe0c078c7e014d, type: 3}
+      propertyPath: m_LocalScale.z
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: b7aefd9aafe383f46bfe0c078c7e014d, type: 3}
       propertyPath: m_LocalPosition.x
-      value: 36.67624
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: b7aefd9aafe383f46bfe0c078c7e014d, type: 3}
       propertyPath: m_LocalPosition.y
-      value: 0.01961
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: b7aefd9aafe383f46bfe0c078c7e014d, type: 3}
       propertyPath: m_LocalPosition.z
-      value: -10.97484
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: b7aefd9aafe383f46bfe0c078c7e014d, type: 3}
       propertyPath: m_LocalRotation.w
