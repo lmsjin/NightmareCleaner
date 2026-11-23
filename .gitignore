@@ -56,3 +56,6 @@ Thumbs.db
 
 # MCP/디버그 스크린샷
 Assets/Screenshots/
+
+# 기획 문서 (PDF/XLSX) - 깃에 올리지 않음
+DOCS/

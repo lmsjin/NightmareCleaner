@@ -16,10 +16,9 @@ public class NCConnectScreen
     private readonly Button _createButton;
     private readonly Button _joinButton;
     private readonly TMP_InputField _codeInput;
-    private readonly TextMeshProUGUI _status;
     private readonly System.Action _onBack; // 뒤로를 눌렀을 때 NCUi에 알려 줄 함수
 
-    public NCConnectScreen(RectTransform canvas, System.Action onBack)
+    public NCConnectScreen(RectTransform canvas, System.Action onBack = null)
     {
         _onBack = onBack;
 
@@ -50,13 +49,11 @@ public class NCConnectScreen
         _createButton = view.CreateButton;
         _joinButton = view.JoinButton;
         _codeInput = view.CodeInput;
-        _status = view.Status;
 
         // 비어 있는 칸이 있으면 Console에 이름을 알려 준다
         if (_createButton == null) Debug.LogError("[UI] NCNetView: Create Button 칸이 비어 있음");
         if (_joinButton == null) Debug.LogError("[UI] NCNetView: Join Button 칸이 비어 있음");
         if (_codeInput == null) Debug.LogError("[UI] NCNetView: Code Input 칸이 비어 있음");
-        if (_status == null) Debug.LogError("[UI] NCNetView: Status 칸이 비어 있음");
         if (view.BackButton == null) Debug.LogError("[UI] NCNetView: Back Button 칸이 비어 있음");
 
         // 버튼을 눌렀을 때 실행할 함수 연결
@@ -84,12 +81,6 @@ public class NCConnectScreen
         _createButton.interactable = idle;
         _codeInput.interactable = idle;
         _joinButton.interactable = idle && NCLauncher.IsValidCode(_codeInput.text);
-
-        if (launcher != null && _status != null)
-        {
-            _status.text = launcher.StatusMessage;
-            _status.color = launcher.StatusIsError ? NCStyle.Danger : NCStyle.Text;
-        }
     }
 
     private void OnCreate()

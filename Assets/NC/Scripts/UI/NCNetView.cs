@@ -9,12 +9,10 @@ public class NCNetView : MonoBehaviour
     [SerializeField] private Button _createButton;      // NET-01 방 만들기
     [SerializeField] private Button _joinButton;        // NET-02 참가하기
     [SerializeField] private TMP_InputField _codeInput; // NET-02 초대 코드 입력
-    [SerializeField] private TextMeshProUGUI _status;   // NET-03 연결 상태 문구
     [SerializeField] private Button _backButton;        // NET-04 뒤로
 
     public Button CreateButton => _createButton;
     public Button JoinButton => _joinButton;
     public TMP_InputField CodeInput => _codeInput;
-    public TextMeshProUGUI Status => _status;
     public Button BackButton => _backButton;
 }

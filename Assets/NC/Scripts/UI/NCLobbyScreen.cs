@@ -34,68 +34,51 @@ public class NCLobbyScreen
     {
         _confirm = confirm;
 
-        RectTransform root = NCUiKit.NewRect("LobbyScreen", canvas);
-        NCUiKit.Stretch(root);
-        _root = root.gameObject;
+        // [UI 프리팹 방식] 아트 프리팹(Variant)을 불러와 canvas 아래에 생성한다. (NCConnectScreen과 같은 패턴)
+        GameObject prefab = Resources.Load<GameObject>("UI/Scenes/UI_Lobby");
+        if (prefab == null)
+        {
+            Debug.LogError("[UI] UI_Lobby 프리팹을 찾을 수 없음 — 경로 확인");
+            return;
+        }
 
-        Image dim = NCUiKit.NewImage("Dim", root, null, new Color(0.03f, 0.05f, 0.09f, 0.6f));
-        NCUiKit.Stretch(dim.rectTransform);
-        dim.raycastTarget = true;
+        NCLobbyView view = Object.Instantiate(prefab, canvas, false).GetComponent<NCLobbyView>();
+        if (view == null)
+        {
+            Debug.LogError("[UI] UI_Lobby 루트에 NCLobbyView가 없음 — Variant인지, 루트에 붙었는지 확인");
+            return;
+        }
 
-        TextMeshProUGUI logo = NCUiKit.NewText("Logo", root, "NIGHTMARE CLEANER", 40f, NCStyle.Text, TextAlignmentOptions.Left, FontStyles.Bold);
-        NCUiKit.Place(logo.rectTransform, new Vector2(0f, 1f), new Vector2(NCStyle.Margin, -NCStyle.Margin), new Vector2(600f, 50f));
-        logo.characterSpacing = 4f;
+        _root = view.gameObject;
 
-        RectTransform panel = NCUiKit.NewPanel("Panel", root, deep: true);
-        NCUiKit.Place(panel, new Vector2(0.5f, 0.5f), new Vector2(0f, 10f), new Vector2(900f, 680f));
-        panel.Find("Frame").GetComponent<Image>().color = NCStyle.Brass;
+        // 프리팹 루트를 화면 전체에 맞춘다 (Scale 0·크기 0 방지)
+        RectTransform rect = (RectTransform)view.transform;
+        NCUiKit.Stretch(rect);
+        rect.localScale = Vector3.one;
+        rect.anchoredPosition3D = Vector3.zero;
 
-        TextMeshProUGUI title = NCUiKit.NewText("Title", panel, "대기실", 52f, NCStyle.Text, style: FontStyles.Bold);
-        NCUiKit.Place(title.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -22f), new Vector2(500f, 64f));
+        // 프리팹 안의 요소를 기존 변수에 넣는다 → Tick 코드는 그대로 동작
+        _code = view.CodeText;
+        _status = view.StatusText;
+        _ready = view.ReadyButton;
+        _readyLabel = view.ReadyLabel;
+        _start = view.StartButton;
+        _cards[0] = new SlotCard(view.Slot1P, view.ReadySprite, view.NotReadySprite);
+        _cards[1] = new SlotCard(view.Slot2P, view.ReadySprite, view.NotReadySprite);
+        // 아직 프리팹에 없는 요소 — null이면 Tick에서 건너뛴다
+        // _copied("코드를 복사했습니다"), _waitHost("호스트가 시작합니다"), _leftBanner("동료가 나갔습니다")
 
-        // 방 코드 + 복사
-        RectTransform codeBar = NCUiKit.NewPanel("CodeBar", panel);
-        NCUiKit.Place(codeBar, new Vector2(0.5f, 1f), new Vector2(0f, -96f), new Vector2(420f, 52f));
-        _code = NCUiKit.NewText("Code", codeBar, "", 24f, NCStyle.Text, TextAlignmentOptions.Left);
-        NCUiKit.Place(_code.rectTransform, new Vector2(0f, 0.5f), new Vector2(20f, 0f), new Vector2(280f, 40f));
-        Button copy = NCUiKit.NewButton("Copy", codeBar, "복사", true, Copy);
-        NCUiKit.Place((RectTransform)copy.transform, new Vector2(1f, 0.5f), new Vector2(-8f, 0f), new Vector2(100f, 40f));
-        _copied = NCUiKit.NewText("Copied", panel, "코드를 복사했습니다", 18f, NCStyle.Success);
-        NCUiKit.Place(_copied.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -150f), new Vector2(300f, 24f));
-
-        // 1P·2P 카드
-        _cards[0] = new SlotCard(panel, 0, new Vector2(-200f, -10f));
-        _cards[1] = new SlotCard(panel, 1, new Vector2(200f, -10f));
-
-        // 상태 문구
-        _status = NCUiKit.NewText("Status", panel, "", 24f, NCStyle.Brass, style: FontStyles.Bold);
-        NCUiKit.Place(_status.rectTransform, new Vector2(0.5f, 0f), new Vector2(0f, 112f), new Vector2(700f, 34f));
-
-        // 준비 / 게임 시작
-        _ready = NCUiKit.NewButton("Ready", panel, "준비", false, ToggleReady);
-        NCUiKit.Place((RectTransform)_ready.transform, new Vector2(0.5f, 0f), new Vector2(-150f, 30f), new Vector2(260f, 68f));
-        _readyLabel = _ready.transform.Find("Label").GetComponent<TextMeshProUGUI>();
-
-        _start = NCUiKit.NewButton("Start", panel, "게임 시작", true, StartGame);
-        NCUiKit.Place((RectTransform)_start.transform, new Vector2(0.5f, 0f), new Vector2(150f, 30f), new Vector2(260f, 68f));
-
-        _waitHost = NCUiKit.NewText("WaitHost", panel, "호스트가 시작합니다", 22f, NCStyle.TextDim);
-        NCUiKit.Place(_waitHost.rectTransform, new Vector2(0.5f, 0f), new Vector2(150f, 48f), new Vector2(260f, 32f));
-
-        Button leave = NCUiKit.NewButton("Leave", root, "방 나가기", false, AskLeave);
-        NCUiKit.Place((RectTransform)leave.transform, new Vector2(0f, 0f), new Vector2(NCStyle.Margin, NCStyle.Margin), new Vector2(200f, 56f));
-
-        // 동료 이탈 안내
-        RectTransform banner = NCUiKit.NewPanel("PartnerLeft", root, deep: true);
-        NCUiKit.Place(banner, new Vector2(0.5f, 1f), new Vector2(0f, -NCStyle.Margin), new Vector2(460f, 56f));
-        banner.Find("Frame").GetComponent<Image>().color = NCStyle.Danger;
-        TextMeshProUGUI bannerText = NCUiKit.NewText("Text", banner, "동료가 나갔습니다. 대기실로 돌아왔습니다", 22f, NCStyle.Text);
-        NCUiKit.Stretch(bannerText.rectTransform);
-        _leftBanner = banner.gameObject;
+        // 버튼을 눌렀을 때 실행할 함수 연결 (함수 내용은 기존 그대로)
+        view.CopyButton.onClick.AddListener(Copy);
+        _ready.onClick.AddListener(ToggleReady);
+        _start.onClick.AddListener(StartGame);
+        view.LeaveButton.onClick.AddListener(AskLeave);
     }
 
     public void SetVisible(bool visible)
     {
+        if (_root == null) return; // 프리팹을 못 불러왔으면 아무것도 안 함
+
         if (_root.activeSelf != visible)
         {
             _root.SetActive(visible);
@@ -104,6 +87,8 @@ public class NCLobbyScreen
 
     public void Tick(NCSession session, NCLauncher launcher)
     {
+        if (_root == null) return; // 프리팹을 못 불러왔으면 아무것도 안 함
+
         NCPlayer me = NCPlayer.Local;
         bool isHost = session.Runner != null && session.Runner.IsServer;
         int required = NCBalance.Get.RequiredPlayers;
@@ -119,8 +104,8 @@ public class NCLobbyScreen
             _leftBannerUntil = Time.time + 3f;
         }
 
-        _leftBanner.SetActive(Time.time < _leftBannerUntil);
-        _copied.gameObject.SetActive(Time.time < _copiedUntil);
+        if (_leftBanner != null) _leftBanner.SetActive(Time.time < _leftBannerUntil);
+        if (_copied != null) _copied.gameObject.SetActive(Time.time < _copiedUntil);
 
         for (int slot = 0; slot < 2; slot++)
         {
@@ -141,7 +126,7 @@ public class NCLobbyScreen
         if (key != _shownKey || launcher != null && _code.text.Length == 0)
         {
             _shownKey = key;
-            _code.text = launcher != null ? $"방 코드   <b><color=#F2C34E>{launcher.RoomCode}</color></b>" : "";
+            _code.text = launcher != null ? launcher.RoomCode : ""; // "방 코드" 라벨은 프리팹에 따로 있음
             _status.text = count < required
                 ? $"◆  동료를 기다리는 중 ({count}/{required})  ◆"
                 : (ready < count ? $"◆  준비를 기다리는 중 ({ready}/{count})  ◆" : "◆  모두 준비되었습니다  ◆");
@@ -151,7 +136,7 @@ public class NCLobbyScreen
         _ready.interactable = me != null;
         _start.gameObject.SetActive(isHost);
         _start.interactable = isHost && session.CanStart && Time.time >= _startLockedUntil;
-        _waitHost.gameObject.SetActive(isHost == false);
+        if (_waitHost != null) _waitHost.gameObject.SetActive(isHost == false);
     }
 
     private static void ToggleReady()
@@ -188,56 +173,22 @@ public class NCLobbyScreen
 
     private class SlotCard
     {
-        private readonly int _slot;
-        private readonly Image _back;
-        private readonly Image _frame;
-        private readonly GameObject _figure;
-        private readonly TextMeshProUGUI _state;
-        private readonly Image _statePill;
-        private readonly GameObject _me;
+        // [UI 프리팹 방식] 카드 모양은 아트 프리팹에 있고, 여기서는 참조(NCLobbySlotView)만 받는다.
+        // 카드 배경·테두리 색은 아트 그대로 두고 덮어쓰지 않는다.
+        // deco_image(장식)는 항상 보이므로 코드에서 건드리지 않는다.
+        private readonly TextMeshProUGUI _state; // readytext
+        private readonly Image _stateIcon;       // readystatus/icon — 준비 완료=체크, 준비 중=엑스, 참가 대기=숨김
+        private readonly Sprite _readySprite;
+        private readonly Sprite _notReadySprite;
         private int _shownState = -1;
+        // "나" 표시(_me)는 아직 프리팹에 없어 생략 — 추가하면 여기서 다시 연결
 
-        public SlotCard(RectTransform parent, int slot, Vector2 position)
+        public SlotCard(NCLobbySlotView view, Sprite readySprite, Sprite notReadySprite)
         {
-            _slot = slot;
-            Color color = NCStyle.SlotColor(slot);
-
-            RectTransform card = NCUiKit.NewPanel("Card" + slot, parent);
-            NCUiKit.Place(card, new Vector2(0.5f, 0.5f), position, new Vector2(340f, 330f));
-            _back = card.GetComponent<Image>();
-            _frame = card.Find("Frame").GetComponent<Image>();
-
-            RectTransform tag = NCUiKit.NewSlotTag("Tag", card, slot, 36f);
-            NCUiKit.Place(tag, new Vector2(0f, 1f), new Vector2(14f, -14f), tag.sizeDelta);
-
-            if (slot == 0)
-            {
-                TextMeshProUGUI host = NCUiKit.NewText("Host", card, "◆ 호스트", 20f, NCStyle.Brass, TextAlignmentOptions.Left, FontStyles.Bold);
-                NCUiKit.Place(host.rectTransform, new Vector2(0f, 1f), new Vector2(84f, -18f), new Vector2(140f, 30f));
-            }
-
-            TextMeshProUGUI me = NCUiKit.NewText("Me", card, "나", 20f, NCStyle.Text, TextAlignmentOptions.Right, FontStyles.Bold);
-            NCUiKit.Place(me.rectTransform, new Vector2(1f, 1f), new Vector2(-16f, -18f), new Vector2(60f, 30f));
-            _me = me.gameObject;
-
-            // 청소부 실루엣(슬롯 색): 머리 + 몸통 + 등의 탱크
-            RectTransform figure = NCUiKit.NewRect("Figure", card);
-            NCUiKit.Place(figure, new Vector2(0.5f, 0.5f), new Vector2(0f, 18f), new Vector2(160f, 180f));
-            Image tank = NCUiKit.NewImage("Tank", figure, NCUiKit.RoundSprite, NCStyle.Hex("8C9099"));
-            NCUiKit.Place(tank.rectTransform, new Vector2(0.5f, 0f), new Vector2(-44f, 34f), new Vector2(40f, 80f));
-            Image body = NCUiKit.NewImage("Body", figure, NCUiKit.RoundSprite, color);
-            NCUiKit.Place(body.rectTransform, new Vector2(0.5f, 0f), new Vector2(0f, 0f), new Vector2(110f, 120f));
-            Image head = NCUiKit.NewImage("Head", figure, NCUiKit.CircleSprite, NCStyle.Hex("EDE6DA"));
-            NCUiKit.Place(head.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, 0f), new Vector2(84f, 84f));
-            Image goggles = NCUiKit.NewImage("Goggles", head.rectTransform, NCUiKit.RoundSprite, NCStyle.Hex("1E1E26"));
-            NCUiKit.Place(goggles.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, -4f), new Vector2(60f, 22f));
-            _figure = figure.gameObject;
-
-            // 상태 표시
-            _statePill = NCUiKit.NewImage("StatePill", card, NCUiKit.RoundSprite, NCStyle.BarBack);
-            NCUiKit.Place(_statePill.rectTransform, new Vector2(0.5f, 0f), new Vector2(0f, 18f), new Vector2(220f, 46f));
-            _state = NCUiKit.NewText("State", _statePill.transform, "", 22f, NCStyle.Text, style: FontStyles.Bold);
-            NCUiKit.Stretch(_state.rectTransform);
+            _state = view.StateText;
+            _stateIcon = view.StateIcon;
+            _readySprite = readySprite;
+            _notReadySprite = notReadySprite;
         }
 
         public void Show(NCPlayer player, NCPlayer me)
@@ -245,22 +196,25 @@ public class NCLobbyScreen
             bool joined = player != null && player.Object != null && player.Object.IsValid;
             int state = joined == false ? 0 : (player.Ready ? 2 : 1);
 
-            _me.SetActive(joined && player == me);
-
             if (state == _shownState)
             {
                 return;
             }
 
             _shownState = state;
-            Color color = NCStyle.SlotColor(_slot);
 
-            _figure.SetActive(joined);
-            _state.text = state == 0 ? "참가 대기" : (state == 1 ? "준비 중" : "● 준비 완료");
-            _state.color = state == 2 ? NCStyle.Success : (state == 1 ? NCStyle.Text : NCStyle.TextDim);
-            _statePill.color = state == 2 ? NCStyle.Hex("1E3A2B", 0.95f) : NCStyle.BarBack;
-            _frame.color = state == 2 ? color : NCStyle.BrassDim;
-            _back.color = joined ? NCStyle.Panel : NCStyle.Hex("172536", 0.45f);
+            if (_stateIcon != null)
+            {
+                // 체크/엑스 그림이 비어 있으면 프리팹에 원래 있던 그림을 그대로 쓴다
+                Sprite sprite = state == 2 ? _readySprite : _notReadySprite;
+                if (sprite != null) _stateIcon.sprite = sprite;
+                _stateIcon.gameObject.SetActive(joined);
+            }
+            if (_state != null)
+            {
+                _state.text = state == 0 ? "참가 대기" : (state == 1 ? "준비 중" : "준비 완료");
+                _state.color = state == 2 ? NCStyle.Success : (state == 1 ? NCStyle.Text : NCStyle.TextDim);
+            }
         }
     }
 }
