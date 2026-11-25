@@ -1,5 +1,5 @@
 # ==========================================================================
-# Nightmare Cleaner — Unity .gitignore
+# Mansion Clash — Unity .gitignore
 # 자동 생성 / 로컬 전용 폴더는 커밋하지 않는다(각자 컴퓨터에서 다시 생성됨).
 # Assets/, Packages/, ProjectSettings/ 와 모든 .meta 파일은 반드시 커밋된다.
 # ==========================================================================
@@ -59,3 +59,5 @@ Assets/Screenshots/
 
 # 기획 문서 (PDF/XLSX) - 깃에 올리지 않음
 DOCS/
+/*.pdf
+/*.xlsx

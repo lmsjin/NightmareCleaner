@@ -40,3 +40,6 @@
 *.a    binary
 *.so   binary
 *.dylib binary
+
+# 바이너리로 저장되는 Unity 에셋
+LightingData.asset binary

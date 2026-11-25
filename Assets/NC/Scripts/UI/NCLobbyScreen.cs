@@ -8,7 +8,7 @@ using UnityEngine.UI;
 ///  - [준비]/[준비 취소]: 자기 상태만 요청(호스트가 확정)
 ///  - [게임 시작]: 호스트만, 필요 인원이 모두 준비했을 때 활성. 참가자는 "호스트가 시작합니다"
 ///  - [방 나가기]: 확인 후 이탈 · 방 코드 [복사]
-/// 캐릭터 선택은 없다(고정 두 청소부).
+/// 캐릭터 선택은 없다.
 /// </summary>
 public class NCLobbyScreen
 {
@@ -93,7 +93,7 @@ public class NCLobbyScreen
         bool isHost = session.Runner != null && session.Runner.IsServer;
         int required = NCBalance.Get.RequiredPlayers;
 
-        // 동료 이탈 안내(새로 생겼을 때만)
+        // 상대 이탈 안내(새로 생겼을 때만)
         if (_seenPartnerLeft < 0)
         {
             _seenPartnerLeft = session.PartnerLeftCount;
@@ -128,7 +128,7 @@ public class NCLobbyScreen
             _shownKey = key;
             _code.text = launcher != null ? launcher.RoomCode : ""; // "방 코드" 라벨은 프리팹에 따로 있음
             _status.text = count < required
-                ? $"◆  동료를 기다리는 중 ({count}/{required})  ◆"
+                ? $"◆  상대를 기다리는 중 ({count}/{required})  ◆"
                 : (ready < count ? $"◆  준비를 기다리는 중 ({ready}/{count})  ◆" : "◆  모두 준비되었습니다  ◆");
             _readyLabel.text = meReady ? "준비 취소" : "준비";
         }

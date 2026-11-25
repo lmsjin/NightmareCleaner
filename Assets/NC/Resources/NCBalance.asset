@@ -12,39 +12,59 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 41b4be81fe79ece4b85ffeb6d6fd396c, type: 3}
   m_Name: NCBalance
   m_EditorClassIdentifier: Assembly-CSharp::NCBalance
-  soloTest: 1
-  missionSeconds: 600
-  startZoneRadius: 2.5
+  soloTest: 0
+  countdownSeconds: 3
+  matchSeconds: 300
+  dominancePerSecond: 1
+  captureRadius: 4
   messageSeconds: 2
   playerMaxHp: 100
   playerMoveSpeed: 4.5
-  hitInvincibleSeconds: 0.5
-  reviveHp: 40
-  reviveProtectSeconds: 2
-  reviveRange: 1.5
-  reviveHoldSeconds: 3
+  playerRadius: 0.35
+  regenDelaySeconds: 7
+  regenPerSecond: 10
+  respawnSeconds: 5
+  protectSeconds: 3
   shotDamage: 20
-  fireInterval: 0.25
+  fireInterval: 0.3
   magazineSize: 12
   reloadSeconds: 1.8
   shotRange: 9
-  autoReloadWhenEmpty: 0
-  beamRadius: 0.3
-  basicHp: 60
-  basicMoveSpeed: 2.5
-  basicDamage: 15
-  basicTelegraphSeconds: 0.6
-  basicAttackInterval: 1.2
-  fastHp: 40
-  fastMoveSpeed: 4.8
-  fastDamage: 10
-  fastTelegraphSeconds: 0.5
-  fastAttackInterval: 1.4
-  ghostAttackRange: 1.1
-  ghostSpawnSafeSeconds: 0.7
-  ghostRadius: 0.45
-  dummyRange: 2
-  dummyHoldSeconds: 2
-  spawnWarningSeconds: 1.5
-  waveGapSeconds: 1
-  recordKey: NC_BestRecord_v1
+  bulletSpeed: 14
+  bulletRadius: 0.15
+  overchargeSeconds: 8
+  overchargeFireInterval: 0.2
+  dashDistance: 4
+  dashSeconds: 0.2
+  dashCooldownSeconds: 4
+  basic:
+    count: 1
+    hp: 480
+    speed: 3.2
+    damage: 8
+    attackInterval: 1.2
+    telegraph: 0.35
+    radius: 0.45
+    bodyScale: 1
+  fast:
+    count: 1
+    hp: 480
+    speed: 4.5
+    damage: 6
+    attackInterval: 1
+    telegraph: 0.25
+    radius: 0.4
+    bodyScale: 0.8
+  tank:
+    count: 1
+    hp: 480
+    speed: 2.5
+    damage: 20
+    attackInterval: 1.8
+    telegraph: 0.6
+    radius: 0.65
+    bodyScale: 1.5
+  ghostDetectRange: 5
+  ghostAttackRange: 1
+  ghostChaseMargin: 4
+  campRespawnSeconds: 40

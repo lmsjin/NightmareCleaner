@@ -3,43 +3,87 @@ using Fusion;
 using UnityEngine;
 using UnityEngine.AI;
 
-/// <summary>유령 종류(통합 기획서 기준 2종).</summary>
 public enum NCGhostType
 {
-    Basic, // 기본형 — 느리고 단단함
-    Fast,  // 빠른형 — 빠르고 약함
+    Basic,
+    Fast,
+    Tank,
+}
+
+public enum NCGhostState
+{
+    Idle,
+    Chase,
+    Attack,
+    Return,
 }
 
 /// <summary>
-/// 유령 AI: 접근 → 공격 준비(전조) → 공격 → 다시 접근. 체력 0이면 바로 사라진다.
-///  - 전조에 들어가면 그 공격의 목표를 바꾸지 않고, 멈춰서 몸이 붉어진다(회피 기회).
-///  - 전조가 끝나는 순간 목표가 사거리 안에 남아 있을 때만 1회 피해.
-///  - 등장 직후 0.7초는 공격하지 않는다. 다운된 플레이어는 쫓지 않는다.
-/// AI와 길찾기(NavMeshAgent)는 Host만 돌리고, 위치는 NetworkTransform이 모든 화면에 복제한다.
+/// 중립 유령 FSM: 대기 → 추적 → 공격(준비) → 복귀. 판단은 Host만(NCSession이 순서대로 호출).
+/// 맞으면 쏜 플레이어를 추적하고, 이때는 활동 영역 밖으로 조금 더 쫓아간다.
+/// 활동 영역을 벗어나거나 목표를 잃으면 복귀하며, 복귀 중에는 공격하지도 맞지도 않고 도착하면 회복한다.
+/// 위치는 NetworkTransform이 복제한다.
 /// </summary>
 public class NCGhost : NetworkBehaviour
 {
     public static readonly List<NCGhost> All = new List<NCGhost>();
 
+    private const float ReturnTimeout = 8f;
+
     [SerializeField] private Renderer bodyRenderer;
 
     [Networked] public NCGhostType Type { get; set; }
+    [Networked] public NCGhostState State { get; set; }
     [Networked] public float Hp { get; set; }
-    [Networked] public NetworkBool IsTelegraphing { get; set; }
     [Networked] private TickTimer TelegraphTimer { get; set; }
     [Networked] private TickTimer AttackCooldown { get; set; }
-    [Networked] private TickTimer SpawnSafeTimer { get; set; }
-    [Networked] private PlayerRef LockedTarget { get; set; }
+    [Networked] private TickTimer ReturnTimer { get; set; }
 
+    // Host 전용
     private NavMeshAgent _agent;
+    private NCGhostCamp _camp;
+    private Vector3 _home;
+    private NCPlayer _target;
+    private bool _provoked; // 맞아서 _target을 쫓는 중
 
-    // 연출용
+    // 연출
     private Color _shownColor = new Color(-1f, -1f, -1f, -1f);
     private float _seenHp;
     private float _flashTimer;
     private Vector3 _bodyScale = Vector3.one;
 
-    /// <summary>모든 유령 제거(결과·재도전). Host 전용.</summary>
+    public float HpRatio => Mathf.Clamp01(Hp / Stats.hp);
+
+    /// <summary>체력바를 띄울 높이(발에서부터, 몸의 흔들림은 무시).</summary>
+    public float TopHeight => 0.9f * Mathf.Max(1f, Stats.bodyScale) + 0.9f * Stats.bodyScale + 0.35f;
+
+    private NCBalance.GhostStats Stats => NCBalance.Get.GetGhost(Type);
+
+    public void ServerInit(NCGhostCamp camp, Vector3 home)
+    {
+        _camp = camp;
+        _home = home;
+    }
+
+    public static void ServerTickAll()
+    {
+        foreach (NCGhost ghost in All)
+        {
+            ghost.ServerTick();
+        }
+    }
+
+    public static void ServerStopAll()
+    {
+        foreach (NCGhost ghost in All)
+        {
+            ghost.Stop();
+            ghost.State = NCGhostState.Idle;
+            ghost._target = null;
+            ghost._provoked = false;
+        }
+    }
+
     public static void ServerDespawnAll(NetworkRunner runner)
     {
         foreach (NCGhost ghost in All.ToArray())
@@ -55,20 +99,16 @@ public class NCGhost : NetworkBehaviour
     {
         All.Add(this);
 
-        Stats stats = GetStats(Type);
-
-        // 빠른형은 작게 보인다(몸통 자식의 크기만 바꾼다).
         if (bodyRenderer != null)
         {
-            _bodyScale = bodyRenderer.transform.localScale * (Type == NCGhostType.Fast ? 0.8f : 1f);
+            _bodyScale = bodyRenderer.transform.localScale * Stats.bodyScale;
             bodyRenderer.transform.localScale = _bodyScale;
         }
 
         if (Object.HasStateAuthority)
         {
-            Hp = stats.Hp;
-            SpawnSafeTimer = TickTimer.CreateFromSeconds(Runner, NCBalance.Get.ghostSpawnSafeSeconds);
-            SetupAgent(stats);
+            Hp = Stats.hp;
+            SetupAgent();
         }
 
         _seenHp = Hp;
@@ -77,13 +117,10 @@ public class NCGhost : NetworkBehaviour
     public override void Despawned(NetworkRunner runner, bool hasState)
     {
         All.Remove(this);
-
-        // 상태를 읽을 수 없는 경우(세션 종료 등)엔 [Networked] 값을 건드리지 않는다.
-        Color color = hasState ? BodyColor() : NCStyle.GhostBasic;
-        NCFx.GhostPop(transform.position + Vector3.up * 0.9f, color);
+        NCFx.GhostPop(transform.position + Vector3.up * 0.9f, hasState ? BodyColor() : NCStyle.GhostBasic);
     }
 
-    private void SetupAgent(Stats stats)
+    private void SetupAgent()
     {
         if (NavMesh.SamplePosition(transform.position, out NavMeshHit hit, 2f, NavMesh.AllAreas) == false)
         {
@@ -93,116 +130,244 @@ public class NCGhost : NetworkBehaviour
 
         _agent = gameObject.AddComponent<NavMeshAgent>();
         _agent.Warp(hit.position);
-        _agent.speed = stats.Speed;
-        _agent.acceleration = 30f;
-        _agent.angularSpeed = 720f;
+        _agent.speed = Stats.speed;
         _agent.radius = 0.35f;
         _agent.height = 1.6f;
-        _agent.stoppingDistance = NCBalance.Get.ghostAttackRange * 0.7f;
         _agent.updateRotation = false;
-        _agent.autoBraking = true;
+
+        // 길만 찾게 하고 이동은 Tick에서 직접 한다. 에이전트가 프레임마다 옮긴 위치는
+        // NetworkTransform이 Tick 시작에 되돌려, 호스트 FPS에 따라 속도가 달라진다.
+        _agent.updatePosition = false;
     }
 
     // ───────── Host AI ─────────
 
-    public override void FixedUpdateNetwork()
+    private void ServerTick()
     {
-        if (Object.HasStateAuthority == false)
+        NCBalance balance = NCBalance.Get;
+
+        if (State == NCGhostState.Return)
         {
+            TickReturn();
             return;
         }
 
-        NCBalance balance = NCBalance.Get;
-        Stats stats = GetStats(Type);
+        if (_camp != null && _camp.Contains(transform.position, _provoked ? balance.ghostChaseMargin : 0f) == false)
+        {
+            BeginReturn();
+            return;
+        }
 
-        if (IsTelegraphing)
+        if (State == NCGhostState.Attack)
         {
             Stop();
 
             if (TelegraphTimer.Expired(Runner))
             {
-                IsTelegraphing = false;
-                AttackCooldown = TickTimer.CreateFromSeconds(Runner, stats.AttackInterval);
-                ResolveAttack(stats, balance);
+                State = NCGhostState.Chase;
+                ResolveAttack(balance);
             }
 
             return;
         }
 
-        NCPlayer target = FindNearestAlivePlayer();
-        if (target == null)
+        if (IsTargetValid(_target) == false)
         {
-            Stop();
+            _provoked = false;
+            _target = FindTarget(balance);
+        }
+
+        if (_target == null)
+        {
+            if (State == NCGhostState.Chase)
+            {
+                BeginReturn();
+            }
+
             return;
         }
 
-        float distance = NCMath.FlatDistance(target.transform.position, transform.position);
-        Chase(target.transform.position);
+        State = NCGhostState.Chase;
+        Vector3 to = NCMath.Flat(_target.transform.position - transform.position);
 
-        bool ready = SpawnSafeTimer.ExpiredOrNotRunning(Runner) && AttackCooldown.ExpiredOrNotRunning(Runner);
-        if (ready && distance <= balance.ghostAttackRange)
+        if (to.magnitude > balance.ghostAttackRange)
         {
-            LockedTarget = target.Object.InputAuthority;
-            IsTelegraphing = true;
-            TelegraphTimer = TickTimer.CreateFromSeconds(Runner, stats.Telegraph);
-            Face(target.transform.position - transform.position);
-            Stop();
+            MoveTo(_target.transform.position, balance.ghostAttackRange * 0.7f);
+            return;
+        }
+
+        Stop();
+        Face(to);
+
+        if (AttackCooldown.ExpiredOrNotRunning(Runner))
+        {
+            State = NCGhostState.Attack;
+            TelegraphTimer = TickTimer.CreateFromSeconds(Runner, Stats.telegraph);
+            AttackCooldown = TickTimer.CreateFromSeconds(Runner, Stats.attackInterval);
         }
     }
 
-    private void ResolveAttack(Stats stats, NCBalance balance)
+    private void ResolveAttack(NCBalance balance)
     {
-        foreach (NCPlayer player in NCPlayer.All)
+        if (_target == null || _target.Health.IsDown || NCBulletSystem.Instance == null)
         {
-            if (player.Object.InputAuthority != LockedTarget)
+            return;
+        }
+
+        Vector3 position = _target.transform.position;
+        if (NCMath.FlatDistance(position, transform.position) <= balance.ghostAttackRange
+            && NCBulletSystem.HasSight(transform.position, position))
+        {
+            NCBulletSystem.Instance.ServerQueueGhostAttack(_target.Health, Stats.damage, transform.position);
+        }
+    }
+
+    private bool IsTargetValid(NCPlayer player)
+    {
+        return player != null && player.Object != null && player.Object.IsValid && player.Health.IsDown == false
+               && (_camp == null || (_provoked && player == _target) || _camp.Contains(player.transform.position));
+    }
+
+    /// <summary>감지 거리·활동 영역·시야를 만족하는 가장 가까운 생존자(같으면 1P 우선). 보호 중이면 제외.</summary>
+    private NCPlayer FindTarget(NCBalance balance)
+    {
+        NCPlayer best = null;
+        float bestDistance = balance.ghostDetectRange;
+
+        for (int slot = 0; slot < 2; slot++)
+        {
+            NCPlayer player = NCPlayer.FindBySlot(slot);
+            if (IsTargetValid(player) == false || player.Health.IsProtected)
             {
                 continue;
             }
 
-            // 전조를 보고 피했다면 빗나간다.
-            if (NCMath.FlatDistance(player.transform.position, transform.position) <= balance.ghostAttackRange)
+            float distance = NCMath.FlatDistance(player.transform.position, transform.position);
+            bool closer = best == null ? distance <= bestDistance : distance < bestDistance;
+            if (closer && NCBulletSystem.HasSight(transform.position, player.transform.position))
             {
-                player.Health.TakeDamage(stats.Damage);
+                best = player;
+                bestDistance = distance;
+            }
+        }
+
+        return best;
+    }
+
+    private void BeginReturn()
+    {
+        _target = null;
+        _provoked = false;
+        State = NCGhostState.Return;
+        ReturnTimer = TickTimer.CreateFromSeconds(Runner, ReturnTimeout);
+    }
+
+    private void TickReturn()
+    {
+        MoveTo(_home, 0.1f);
+        bool arrived = NCMath.FlatDistance(transform.position, _home) <= 0.5f;
+
+        // 길이 막혀 돌아가지 못하면 원위치로 옮긴다.
+        if (arrived == false && ReturnTimer.Expired(Runner))
+        {
+            if (_agent != null)
+            {
+                _agent.Warp(_home);
+                transform.position = _home;
             }
 
-            return;
+            arrived = true;
+        }
+
+        if (arrived)
+        {
+            Stop();
+            Hp = Stats.hp;
+            State = NCGhostState.Idle;
         }
     }
 
-    /// <summary>총에 맞았을 때. Host 전용.</summary>
-    public void ServerTakeDamage(float amount)
+    /// <summary>탄환 피해. 사망은 캠프에 한 번만 통보한다. 실제로 들어간 피해량을 돌려준다(복귀 중이면 0). Host 전용.</summary>
+    public float ServerTakeDamage(float amount, int attackerSlot)
     {
-        if (Object.HasStateAuthority == false || Hp <= 0f)
+        if (Object == null || Object.IsValid == false || Hp <= 0f || State == NCGhostState.Return)
         {
-            return;
+            return 0f;
         }
 
+        float dealt = Mathf.Min(Hp, amount);
         Hp -= amount;
 
         if (Hp <= 0f)
         {
+            if (_camp != null)
+            {
+                _camp.ServerNotifyDeath(attackerSlot);
+            }
+
             Runner.Despawn(Object);
+            return dealt;
         }
+
+        Provoke(attackerSlot);
+        return dealt;
     }
 
-    private void Chase(Vector3 destination)
+    /// <summary>쏜 플레이어를 목표로 삼는다. 이미 유효한 다른 목표가 있으면 바꾸지 않는다.</summary>
+    private void Provoke(int attackerSlot)
     {
-        if (_agent != null && _agent.isOnNavMesh)
+        NCPlayer attacker = NCPlayer.FindBySlot(attackerSlot);
+        if (attacker == null || attacker.Health.IsDown || (attacker != _target && IsTargetValid(_target)))
         {
-            _agent.isStopped = false;
-            _agent.SetDestination(destination);
-
-            Vector3 velocity = NCMath.Flat(_agent.velocity);
-            Face(velocity.sqrMagnitude > 0.05f ? velocity : destination - transform.position);
+            return;
         }
+
+        _target = attacker;
+        _provoked = true;
+    }
+
+    private void MoveTo(Vector3 destination, float stopping)
+    {
+        if (_agent == null || _agent.isOnNavMesh == false)
+        {
+            return;
+        }
+
+        Vector3 position = transform.position;
+        _agent.nextPosition = position;
+        _agent.velocity = Vector3.zero;
+        _agent.SetDestination(destination);
+
+        if (_agent.hasPath == false || NCMath.FlatDistance(position, destination) <= stopping)
+        {
+            Face(destination - position);
+            return;
+        }
+
+        Vector3 to = NCMath.Flat(_agent.steeringTarget - position);
+        Vector3 next = position + Vector3.ClampMagnitude(to, Stats.speed * Runner.DeltaTime);
+
+        // 걸을 수 있는 곳을 벗어나지 않게 가장 가까운 NavMesh 위로 붙인다(모서리에서는 미끄러진다).
+        if (NavMesh.SamplePosition(next, out NavMeshHit hit, 0.5f, NavMesh.AllAreas))
+        {
+            next = hit.position;
+        }
+
+        transform.position = next;
+        _agent.nextPosition = next;
+        Face(to);
     }
 
     private void Stop()
     {
         if (_agent != null && _agent.isOnNavMesh)
         {
-            _agent.isStopped = true;
+            _agent.nextPosition = transform.position;
             _agent.velocity = Vector3.zero;
+            if (_agent.hasPath)
+            {
+                _agent.ResetPath();
+            }
         }
     }
 
@@ -215,52 +380,17 @@ public class NCGhost : NetworkBehaviour
         }
     }
 
-    private NCPlayer FindNearestAlivePlayer()
-    {
-        NCPlayer nearest = null;
-        float best = float.MaxValue;
+    // ───────── 연출 ─────────
 
-        foreach (NCPlayer player in NCPlayer.All)
+    public Color BodyColor()
+    {
+        switch (Type)
         {
-            if (player.Health.IsDown)
-            {
-                continue;
-            }
-
-            float distance = NCMath.FlatDistance(player.transform.position, transform.position);
-            if (distance < best)
-            {
-                best = distance;
-                nearest = player;
-            }
+            case NCGhostType.Fast: return NCStyle.GhostFast;
+            case NCGhostType.Tank: return NCStyle.GhostTank;
+            default: return NCStyle.GhostBasic;
         }
-
-        return nearest;
     }
-
-    // ───────── 수치 ─────────
-
-    private struct Stats
-    {
-        public float Hp;
-        public float Speed;
-        public int Damage;
-        public float Telegraph;
-        public float AttackInterval;
-    }
-
-    private static Stats GetStats(NCGhostType type)
-    {
-        NCBalance b = NCBalance.Get;
-
-        return type == NCGhostType.Fast
-            ? new Stats { Hp = b.fastHp, Speed = b.fastMoveSpeed, Damage = b.fastDamage, Telegraph = b.fastTelegraphSeconds, AttackInterval = b.fastAttackInterval }
-            : new Stats { Hp = b.basicHp, Speed = b.basicMoveSpeed, Damage = b.basicDamage, Telegraph = b.basicTelegraphSeconds, AttackInterval = b.basicAttackInterval };
-    }
-
-    // ───────── 연출 (모든 화면) ─────────
-
-    private Color BodyColor() => Type == NCGhostType.Fast ? NCStyle.GhostFast : NCStyle.GhostBasic;
 
     public override void Render()
     {
@@ -275,12 +405,15 @@ public class NCGhost : NetworkBehaviour
         Color color = BodyColor();
         float pulse = 1f;
 
-        if (IsTelegraphing)
+        if (State == NCGhostState.Attack)
         {
-            // 공격 준비: 붉게 깜빡이며 살짝 부풀어 오른다.
             float t = Mathf.PingPong(Time.time * 8f, 1f);
             color = Color.Lerp(NCStyle.GhostTelegraph, Color.white, t * 0.25f);
             pulse = 1f + 0.12f * t;
+        }
+        else if (State == NCGhostState.Return)
+        {
+            color = Color.Lerp(color, Color.black, 0.45f); // 복귀 중(무적)
         }
 
         if (_flashTimer > 0f)
@@ -288,22 +421,20 @@ public class NCGhost : NetworkBehaviour
             color = Color.white;
         }
 
-        if (bodyRenderer != null)
+        if (bodyRenderer == null)
         {
-            // 색이 바뀔 때만 적용한다.
-            if (color != _shownColor)
-            {
-                _shownColor = color;
-                bodyRenderer.material.color = color;
-            }
+            return;
         }
 
-        // 둥실둥실 떠 있는 느낌 + 전조 때 부풀기(몸통 자식만 — 루트는 NetworkTransform이 다룬다)
-        if (bodyRenderer != null)
+        if (color != _shownColor)
         {
-            Transform body = bodyRenderer.transform;
-            body.localPosition = new Vector3(0f, 0.9f + Mathf.Sin(Time.time * 3f + GetInstanceID()) * 0.08f, 0f);
-            body.localScale = _bodyScale * pulse;
+            _shownColor = color;
+            bodyRenderer.material.color = color;
         }
+
+        Transform body = bodyRenderer.transform;
+        float height = 0.9f * Mathf.Max(1f, Stats.bodyScale);
+        body.localPosition = new Vector3(0f, height + Mathf.Sin(Time.time * 3f + GetInstanceID()) * 0.08f, 0f);
+        body.localScale = _bodyScale * pulse;
     }
 }

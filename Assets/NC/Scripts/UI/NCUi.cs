@@ -3,13 +3,23 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.UI;
 
+/// <summary>알림음 종류.</summary>
+public enum NCSound
+{
+    Tick,
+    Reward,
+    Win,
+    Lose,
+}
+
 /// <summary>
 /// 화면 전체를 코드로 만들고 상태에 따라 전환한다: 접속 → 대기실 → 인게임 HUD(+Esc 메뉴) → 결과.
-/// 화면은 게임 상태를 바꾸지 않고 확정된 값(NCSession·NCCombatRoom·NCPlayer)을 읽어 그리기만 한다.
+/// 화면은 게임 상태를 바꾸지 않고 확정된 값(NCSession·NCGhostCamp·NCPlayer)을 읽어 그리기만 한다.
 /// 버튼은 요청만 한다(방 만들기·참가·재도전·나가기).
 ///
 /// 기준 해상도 1920×1080, Scale With Screen Size(Match 0.5). 씬의 "UI" 오브젝트에 붙인다.
 /// </summary>
+[DefaultExecutionOrder(500)] // NCCameraRig.LateUpdate 뒤에 머리 위 표시를 옮긴다
 public class NCUi : MonoBehaviour
 {
     [Tooltip("한글 TMP 폰트(빌더가 맑은 고딕 SDF를 연결)")]
@@ -28,20 +38,37 @@ public class NCUi : MonoBehaviour
 
     public RectTransform Root => _root;
 
+    private static NCUi _instance;
+    private AudioSource _audio;
+
+    /// <summary>짧은 알림음(기존 Resources/Audio 클립 재사용).</summary>
+    public static void PlaySound(NCSound sound)
+    {
+        if (_instance == null)
+        {
+            return;
+        }
+
+        string clip = sound == NCSound.Win ? "bgm_clear" : sound == NCSound.Lose ? "bgm_gameover" : sound == NCSound.Reward ? "bgm_levelup" : "bgm_uiclick";
+        AudioClip asset = Resources.Load<AudioClip>("Audio/" + clip);
+        if (asset != null)
+        {
+            _instance._audio.PlayOneShot(asset, 0.6f);
+        }
+    }
+
     // 게임에서 쓰는 글자들. 시작할 때 한 번에 폰트에 등록해 플레이 중 "처음 나오는 글자"로 멈추지 않게 한다.
     private const string Glyphs =
-        "0123456789:/.%()!?·◆●- " +
+        "0123456789:/.%()!?+~- " +
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz" +
-        "남은시간시작전소탕완료방코드의뢰안내전투방유령을모두하세요잡동사니를함께치우면이나타납니다" +
-        "동료접속기다리는중앙홀빛나원으로이동마우스조준좌클릭사격재장전상호작용" +
-        "출현차정리길게눌러구조움직이지마세요먼저다른끝나야합니다출입구에서떨어져주" +
-        "다운되었습니다성공필요나체력무" +
-        "실패초과두명쓰러졌습니다제한안에하지못했경과최고기록없음팀횟수회신기록등록않습니도전가기" +
-        "호스트가선택하기를는멀티플레이인협새만들고초대참가받은입력예취종형식확인해할수없가득찼연결이되어단합" +
-        "부족대기실준비완료중취소게임시작호스트합니다복사했습니다방나가기동료가나갔습니다돌아왔습니다메뉴계속하기온라인진행됩니다닫기확인두의뢰종료됩니까Esc서쪽갤러리동쪽응접실연회장창고집무실서고주방보급과충전준비사용중무소모충분잠김후가능해금명체력또는Q▲구조완료";
+        "·▲◆●" +
+        "가간게겠격결경계과근기까나남뉴는능니다단닫달대도돌동되됩두드득등라령로록료른를리립만메면모목못무방배보본부비빠사상서성세소속수쉬스습승시식실씬아악앙어없었에연예온완요용우유율은을음이인일임장재전점접제종주준중지진참찼초최충취치커코탈탱트패포하한할합해했행현형호확활회획횟후류률막망명처체타";
 
     private void Awake()
     {
+        _instance = this;
+        _audio = gameObject.AddComponent<AudioSource>();
+        _audio.playOnAwake = false;
         NCUiKit.Font = font;
 
         if (font != null)
@@ -91,7 +118,7 @@ public class NCUi : MonoBehaviour
         bool finished = ready && session.IsFinished;
         bool inGame = connected && lobby == false && finished == false;
 
-        // 메뉴는 입구·진행 중에만. 결과가 확정되거나 대기실로 돌아가면 닫는다.
+        // 메뉴는 카운트다운·진행 중에만. 결과가 확정되거나 대기실로 돌아가면 닫는다.
         if (inGame == false && _menu.IsOpen)
         {
             _menu.Close();
@@ -127,6 +154,11 @@ public class NCUi : MonoBehaviour
         }
 
         InputBlocked = _menu.IsOpen || _confirm.IsOpen;
+    }
+
+    private void LateUpdate()
+    {
+        _hud.LateTick();
     }
 
     /// <summary>Esc는 위에 열린 것부터 하나씩 닫는다: 확인 팝업 → 메뉴. 게임 중이면 메뉴를 연다.</summary>

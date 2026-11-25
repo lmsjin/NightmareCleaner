@@ -102,11 +102,11 @@
 2. **담당 구역을 나누기** — 각자 자기 폴더 위주로:
    | 담당 | 주로 만지는 폴더 |
    |---|---|
-   | 멀티/플레이어/전투 | `Assets/Scripts/Net/` |
-   | 적/성장/월드 | `Assets/Scripts/Ghost/`, `Ability/` |
-   | UI/그래픽 | `Assets/Scripts/UI/`, 아트 에셋 |
+   | 멀티/플레이어/전투 | `Assets/NC/Scripts/Core/`, `Player/` |
+   | 적/성장/월드 | `Assets/NC/Scripts/Ghost/`, `World/` |
+   | UI/그래픽 | `Assets/NC/Scripts/UI/`, 아트 에셋 |
 3. **같은 씬(.unity)·프리팹(.prefab)을 두 명이 동시에 크게 고치지 않기**
-   - 씬을 만져야 하면 팀 채팅에 "나 지금 NetSlice 씬 작업할게" 하고 말하기
+   - 씬을 만져야 하면 팀 채팅에 "나 지금 NC_Game 씬 작업할게" 하고 말하기
 4. **작게 자주 커밋·푸시** — 오래 안 올리고 쌓아두지 않기
 
 ---

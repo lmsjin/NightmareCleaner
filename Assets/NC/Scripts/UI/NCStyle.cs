@@ -21,17 +21,17 @@ public static class NCStyle
 
     public static readonly Color GhostBasic = Hex("C9B6F2");
     public static readonly Color GhostFast = Hex("9EE6F0");
+    public static readonly Color GhostTank = Hex("D98A6A");
+    public static readonly Color ShotNormal = Hex("FFF1C2");
+    public static readonly Color ShotOvercharge = Hex("2FE6C8");
     public static readonly Color GhostTelegraph = Hex("FF5A6E");
 
     // 글자 크기(기준 해상도 1920×1080)
     public const float FontBody = 24f;
     public const float FontGuide = 28f;
-    public const float FontTimer = 44f;
-    public const float FontTitle = 64f;
 
     // 여백
     public const float Margin = 32f;
-    public const float Gap = 12f;
 
     public static Color SlotColor(int slot) => slot == 0 ? P1 : P2;
 

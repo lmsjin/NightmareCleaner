@@ -181,16 +181,6 @@ public static class NCUiKit
         return cap.rectTransform;
     }
 
-    /// <summary>슬롯 태그(1P 파랑 / 2P 노랑).</summary>
-    public static RectTransform NewSlotTag(string name, Transform parent, int slot, float height = 30f)
-    {
-        Image tag = NewImage(name, parent, RoundSprite, NCStyle.SlotColor(slot));
-        tag.rectTransform.sizeDelta = new Vector2(height * 1.6f, height);
-        TextMeshProUGUI label = NewText("Label", tag.transform, slot == 0 ? "1P" : "2P", height * 0.6f, NCStyle.PanelDeep, style: FontStyles.Bold);
-        Stretch(label.rectTransform);
-        return tag.rectTransform;
-    }
-
     public static Button NewButton(string name, Transform parent, string label, bool primary, UnityAction onClick)
     {
         RectTransform rect = NewPanel(name, parent, deep: primary == false);
@@ -216,30 +206,5 @@ public static class NCUiKit
         TextMeshProUGUI text = NewText("Label", rect, label, NCStyle.FontBody + 2f, NCStyle.Text, style: FontStyles.Bold);
         Stretch(text.rectTransform);
         return button;
-    }
-
-    public static TMP_InputField NewInput(string name, Transform parent, string placeholder)
-    {
-        RectTransform rect = NewPanel(name, parent, deep: true);
-        rect.GetComponent<Image>().raycastTarget = true;
-
-        RectTransform area = NewRect("TextArea", rect);
-        Stretch(area, 10f);
-        area.gameObject.AddComponent<RectMask2D>();
-
-        TextMeshProUGUI hint = NewText("Placeholder", area, placeholder, NCStyle.FontBody, NCStyle.TextDim, TextAlignmentOptions.Center);
-        Stretch(hint.rectTransform);
-        TextMeshProUGUI value = NewText("Text", area, "", NCStyle.FontGuide, NCStyle.Text, TextAlignmentOptions.Center, FontStyles.Bold);
-        Stretch(value.rectTransform);
-
-        TMP_InputField field = rect.gameObject.AddComponent<TMP_InputField>();
-        field.textViewport = area;
-        field.textComponent = value;
-        field.placeholder = hint;
-        field.fontAsset = Font;
-        field.characterLimit = 6;
-        field.contentType = TMP_InputField.ContentType.Alphanumeric;
-        field.onValidateInput = (text, index, c) => char.ToUpperInvariant(c);
-        return field;
     }
 }

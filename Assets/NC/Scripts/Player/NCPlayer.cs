@@ -3,8 +3,7 @@ using Fusion;
 using UnityEngine;
 
 /// <summary>
-/// 플레이어 본체: 슬롯(1P/2P)·이동·조준 회전·행동 가능 여부.
-/// 다른 판정(정리·구조)이 읽을 수 있도록 이번 Tick의 입력 상태(E 유지·이동·사격)를 [Networked]로 공개한다.
+/// 플레이어 본체: 슬롯(1P/2P)·이동·대쉬·조준 회전·행동 가능 여부.
 ///
 /// 프리팹 구성(빌더가 생성): NetworkObject · CharacterController · NetworkCharacterController ·
 /// NCPlayer · NCHealth · NCGun, 자식 "Body"(색이 바뀌는 몸통)·"Nozzle"(총구).
@@ -12,6 +11,9 @@ using UnityEngine;
 [RequireComponent(typeof(NetworkCharacterController))]
 public class NCPlayer : NetworkBehaviour
 {
+    /// <summary>플레이어끼리 서로 막지 않도록 쓰는 전용 레이어(이름 없는 빈 레이어).</summary>
+    public const int Layer = 10;
+
     /// <summary>접속 중인 모든 플레이어(모든 PC에서 유지).</summary>
     public static readonly List<NCPlayer> All = new List<NCPlayer>();
 
@@ -37,13 +39,19 @@ public class NCPlayer : NetworkBehaviour
     /// <summary>0 = 1P(파랑), 1 = 2P(노랑).</summary>
     [Networked] public int Slot { get; set; }
 
-    /// <summary>이번 Tick에 E를 누르고 있는지 / 이동 입력이 있는지 / 사격 입력이 있는지.</summary>
-    [Networked] public NetworkBool HoldingInteract { get; set; }
-    [Networked] public NetworkBool IsMoving { get; set; }
-    [Networked] public NetworkBool IsFiring { get; set; }
-
     /// <summary>대기실 준비 상태(각자 요청, 호스트 확정).</summary>
     [Networked] public NetworkBool Ready { get; set; }
+
+    [Networked] private TickTimer DashTimer { get; set; }
+    [Networked] private TickTimer DashCooldown { get; set; }
+    [Networked] private Vector3 DashDirection { get; set; }
+    [Networked] private NetworkButtons PreviousButtons { get; set; }
+
+    /// <summary>대쉬로 이동하는 중(무적 아님, 사격 불가).</summary>
+    public bool IsDashing => DashTimer.IsRunning && DashTimer.Expired(Runner) == false;
+
+    /// <summary>대쉬를 다시 쓸 수 있을 때까지의 진행도(1이면 사용 가능).</summary>
+    public float DashReadyRatio => Mathf.Clamp01(1f - (DashCooldown.RemainingTime(Runner) ?? 0f) / NCBalance.Get.dashCooldownSeconds);
 
     /// <summary>슬롯 색이 칠해지는 몸통 렌더러(피격 깜빡임에도 쓴다).</summary>
     public Renderer BodyRenderer => bodyRenderer;
@@ -51,7 +59,6 @@ public class NCPlayer : NetworkBehaviour
     public NCHealth Health { get; private set; }
     public NCGun Gun { get; private set; }
     public Vector3 MuzzlePosition => nozzle != null ? nozzle.position : transform.position + Vector3.up;
-    public string SlotLabel => Slot == 0 ? "1P" : "2P";
     public Color SlotColor => NCStyle.SlotColor(Slot);
 
     /// <summary>이동·사격 등 행동이 가능한지(다운·결과 화면이면 불가).</summary>
@@ -59,18 +66,15 @@ public class NCPlayer : NetworkBehaviour
     {
         get
         {
-            if (Health != null && Health.IsDown)
-            {
-                return false;
-            }
-
             NCSession session = NCSession.Instance;
-            return session == null || (session.IsFinished == false && session.Phase != NCPhase.Lobby);
+            return Health != null && Health.IsDown == false
+                   && session != null && session.Object != null && session.Object.IsValid && session.IsPlaying;
         }
     }
 
     private NetworkCharacterController _controller;
     private float _turnSpeed = 900f;
+    private float _puffTimer;
 
     private void Awake()
     {
@@ -82,6 +86,7 @@ public class NCPlayer : NetworkBehaviour
     public override void Spawned()
     {
         All.Add(this);
+        gameObject.layer = Layer;
 
         NCBalance balance = NCBalance.Get;
         _controller.maxSpeed = balance.playerMoveSpeed;
@@ -110,27 +115,88 @@ public class NCPlayer : NetworkBehaviour
 
     public override void FixedUpdateNetwork()
     {
+        NCBalance balance = NCBalance.Get;
         bool hasInput = GetInput(out NCInput input);
+        bool canAct = CanAct;
 
-        if (hasInput == false || CanAct == false)
+        if (hasInput)
         {
-            HoldingInteract = false;
-            IsMoving = false;
-            IsFiring = false;
+            bool pressed = input.Buttons.WasPressed(PreviousButtons, NCButton.Dash);
+            PreviousButtons = input.Buttons; // 행동 불가 중에 누르고 있던 키는 새로 누른 것으로 치지 않는다.
+
+            if (canAct && pressed && DashCooldown.ExpiredOrNotRunning(Runner))
+            {
+                StartDash(input);
+            }
+        }
+
+        // maxSpeed는 네트워크 값이 아니므로 재시뮬레이션에 대비해 매 Tick 다시 정한다.
+        _controller.maxSpeed = balance.playerMoveSpeed;
+
+        if (canAct && IsDashing)
+        {
+            MoveDash(balance.dashDistance / balance.dashSeconds);
+        }
+        else if (hasInput && canAct)
+        {
+            _controller.Move(new Vector3(input.Move.x, 0f, input.Move.y));
+        }
+        else
+        {
             _controller.Move(Vector3.zero); // 중력만 적용
-            ClampUpwardVelocity();
+        }
+
+        ClampUpwardVelocity();
+
+        if (hasInput && canAct)
+        {
+            FaceAim(input.AimPoint);
+        }
+    }
+
+    private void StartDash(NCInput input)
+    {
+        Vector3 direction = new Vector3(input.Move.x, 0f, input.Move.y);
+        if (direction.sqrMagnitude < 0.01f)
+        {
+            direction = NCMath.Flat(input.AimPoint - transform.position);
+        }
+
+        if (direction.sqrMagnitude < 0.01f)
+        {
+            direction = NCMath.Flat(transform.forward);
+        }
+
+        DashDirection = direction.normalized;
+        DashTimer = TickTimer.CreateFromSeconds(Runner, NCBalance.Get.dashSeconds);
+        DashCooldown = TickTimer.CreateFromSeconds(Runner, NCBalance.Get.dashCooldownSeconds);
+    }
+
+    /// <summary>가속 없이 바로 대쉬 속도로 움직인다. 벽·가구에는 CharacterController가 막힌다.</summary>
+    private void MoveDash(float speed)
+    {
+        Vector3 velocity = DashDirection * speed;
+        velocity.y = _controller.Velocity.y;
+        _controller.maxSpeed = speed;
+        _controller.Velocity = velocity;
+        _controller.Move(DashDirection);
+    }
+
+    /// <summary>대쉬 자국(모든 화면).</summary>
+    public override void Render()
+    {
+        if (IsDashing == false)
+        {
+            _puffTimer = 0f;
             return;
         }
 
-        Vector3 direction = new Vector3(input.Move.x, 0f, input.Move.y);
-        _controller.Move(direction);
-        ClampUpwardVelocity();
-
-        HoldingInteract = input.IsDown(NCButton.Interact);
-        IsMoving = direction.sqrMagnitude > 0.01f;
-        IsFiring = input.IsDown(NCButton.Fire);
-
-        FaceAim(input.AimPoint);
+        _puffTimer -= Time.deltaTime;
+        if (_puffTimer <= 0f)
+        {
+            _puffTimer = 0.03f;
+            NCFx.DashTrail(transform.position + Vector3.up * 0.6f, SlotColor);
+        }
     }
 
     /// <summary>
@@ -170,10 +236,24 @@ public class NCPlayer : NetworkBehaviour
         }
     }
 
-    /// <summary>재도전 때 입구로 옮긴다. Host의 Tick 안에서만 호출한다.</summary>
-    public void ServerTeleport(Vector3 position, Quaternion rotation)
+    /// <summary>사망: 대쉬를 끊고 대기를 없앤다. Host 전용.</summary>
+    public void ServerResetDash()
     {
-        _controller.Teleport(position, rotation);
+        DashTimer = TickTimer.None;
+        DashCooldown = TickTimer.None;
+    }
+
+    /// <summary>자기 스폰으로 옮기고 대쉬를 초기화한다. Host의 Tick 안에서만 호출한다.</summary>
+    public void ServerMoveToSpawn()
+    {
+        ServerResetDash();
+
+        Transform point = NCLauncher.Instance != null ? NCLauncher.Instance.GetEntrySpawn(Slot) : null;
+        if (point != null)
+        {
+            _controller.Teleport(point.position, point.rotation);
+            _controller.Velocity = Vector3.zero;
+        }
     }
 
     private void ApplyColor()

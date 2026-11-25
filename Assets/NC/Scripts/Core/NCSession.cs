@@ -1,108 +1,120 @@
-using System.Collections.Generic;
 using Fusion;
 using UnityEngine;
 
-/// <summary>한 판의 진행 단계.</summary>
+/// <summary>경기 단계.</summary>
 public enum NCPhase
 {
-    Lobby,    // 대기실 — 1P·2P 준비 후 호스트가 시작. 행동 불가
-    Entrance, // 저택 입구 — 두 명이 중앙홀 시작 영역에 모이길 기다림. 시간 정지
-    Playing,  // 의뢰 진행 — 시간 흐름
-    Victory,  // 의뢰 완료
-    Defeat,   // 의뢰 실패
+    Lobby,
+    Countdown,
+    Playing,
+    Result,
 }
 
-/// <summary>실패 원인.</summary>
-public enum NCDefeatCause
+/// <summary>점령 구역 상태.</summary>
+public enum NCZoneState
+{
+    Empty,
+    SlotA,
+    SlotB,
+    Contested,
+}
+
+/// <summary>종료 사유.</summary>
+public enum NCEndCause
 {
     None,
-    AllDown, // 전원 다운
-    TimeUp,  // 시간 초과
+    Dominance,
+    TimeUp,
+    Draw,
+    OpponentLeft,
 }
 
 /// <summary>
-/// 한 판(의뢰)의 진행을 확정하는 호스트 관리자. 씬에 하나 배치하는 NetworkObject다.
-///
-///  대기실(준비 → 호스트 시작) → 입구 → (두 명이 시작 영역에) → 진행(10분) → 성공/실패 → [재도전] → 대기실
-///
-/// 판정 순서(UI 기획서 17장): 전원 다운 → 모든 전투방 소탕(성공) → 시간 만료.
-/// 마지막 처치와 전멸이 겹치면 실패, 마지막 처치와 시간 만료가 겹치면 성공이다.
-/// 화면은 이 값들을 읽어 그리기만 한다.
+/// 1:1 점령전 한 경기를 확정하는 호스트 관리자(씬 배치 NetworkObject).
+///  대기실 → 카운트다운 → 진행 → 결과 → 대기실
+/// 한 Tick 순서(기획서 12장): 피해·사망 → 캠프 보상 → 점령 인원 → 지배율 → 100%·시간 → 결과 1회.
+/// 플레이어 이동·사격 뒤에 돌도록 실행 순서를 늦춘다.
 /// </summary>
+[DefaultExecutionOrder(1000)]
 [RequireComponent(typeof(NetworkObject))]
 public class NCSession : NetworkBehaviour
 {
+    public const float WinDominance = 100f;
+
     public static NCSession Instance { get; private set; }
 
-    [Header("빌더가 연결")]
-    [Tooltip("중앙홀 시작 영역의 중심")]
+    [Tooltip("중앙 점령 구역의 중심")]
     [SerializeField] private Transform startZone;
 
-    // ───────── 확정 상태 ─────────
-
     [Networked] public NCPhase Phase { get; set; }
-    [Networked] public NCDefeatCause Cause { get; set; }
-    [Networked] private TickTimer MissionTimer { get; set; }
+    [Networked] public NCEndCause Cause { get; set; }
+    [Networked] public NCZoneState Zone { get; set; }
+    [Networked] private TickTimer PhaseTimer { get; set; }
 
-    /// <summary>시작 영역 안에 있는 인원 / 접속 인원(입구 안내용).</summary>
-    [Networked] public int PlayersInZone { get; set; }
-    [Networked] public int PlayerCount { get; set; }
+    /// <summary>승자 슬롯. 무승부면 -1.</summary>
+    [Networked] public int WinnerSlot { get; set; }
 
-    [Networked] public int ClearedRooms { get; set; }
-    [Networked] public int TotalRooms { get; set; }
+    /// <summary>슬롯별 지배율(0~100, 내부 소수).</summary>
+    [Networked, Capacity(2)] public NetworkArray<float> Dominance => default;
 
-    /// <summary>결과: 경과 시간(1/100초, 내림), 팀 다운 횟수, 호스트 PC 최고 기록(0=없음), 신기록 여부.</summary>
-    [Networked] public int ElapsedCentisec { get; set; }
-    [Networked] public int TeamDownCount { get; set; }
-    [Networked] public int BestCentisec { get; set; }
-    [Networked] public NetworkBool IsNewRecord { get; set; }
+    // 결과 화면 통계(슬롯별, 판정에는 쓰지 않는다). 플레이어가 나가도 남도록 여기에 둔다.
+    [Networked, Capacity(2)] public NetworkArray<int> Kills => default;
+    [Networked, Capacity(2)] public NetworkArray<int> Deaths => default;
+    [Networked, Capacity(2)] public NetworkArray<int> LastHits => default;
+    [Networked, Capacity(2)] public NetworkArray<int> Shots => default;
+    [Networked, Capacity(2)] public NetworkArray<int> Hits => default;
+    [Networked, Capacity(2)] public NetworkArray<float> ZoneSeconds => default;
 
-    /// <summary>이번 판에서 전투가 한 번이라도 시작됐는지. 첫 전투 전에는 과충전(Q)을 막는다.</summary>
-    [Networked] public NetworkBool CombatStarted { get; set; }
+    /// <summary>결과에 남길 남은 시간.</summary>
+    [Networked] private float FinalRemaining { get; set; }
 
-    /// <summary>게임 중 동료가 나가 대기실로 돌아온 횟수(대기실 안내용).</summary>
+    /// <summary>준비·카운트다운 중 상대가 나간 횟수(대기실 안내용).</summary>
     [Networked] public int PartnerLeftCount { get; set; }
 
-    public bool IsMissionRunning => Phase == NCPhase.Playing;
-    public bool IsFinished => Phase == NCPhase.Victory || Phase == NCPhase.Defeat;
-    public Vector3 StartZonePosition => startZone != null ? startZone.position : Vector3.zero;
+    public bool IsPlaying => Phase == NCPhase.Playing;
+    public bool IsFinished => Phase == NCPhase.Result;
+    public Vector3 ZonePosition => startZone != null ? startZone.position : Vector3.zero;
 
-    /// <summary>남은 시간(초). 입구에서는 제한 시간 그대로.</summary>
     public float RemainingSeconds
     {
         get
         {
-            NCBalance balance = NCBalance.Get;
-
             switch (Phase)
             {
-                case NCPhase.Lobby:
-            case NCPhase.Entrance:
-                    return balance.missionSeconds;
-                case NCPhase.Playing:
-                    return Mathf.Max(0f, MissionTimer.RemainingTime(Runner) ?? 0f);
-                default:
-                    return Mathf.Max(0f, balance.missionSeconds - ElapsedCentisec / 100f);
+                case NCPhase.Playing: return Mathf.Max(0f, PhaseTimer.RemainingTime(Runner) ?? 0f);
+                case NCPhase.Result: return FinalRemaining;
+                default: return NCBalance.Get.matchSeconds;
             }
         }
     }
 
-    // ───────── Host 전용 ─────────
+    public float CountdownSeconds => Phase == NCPhase.Countdown ? Mathf.Max(0f, PhaseTimer.RemainingTime(Runner) ?? 0f) : 0f;
 
-    private readonly Dictionary<PlayerRef, bool> _wasDown = new Dictionary<PlayerRef, bool>();
+    /// <summary>화면 표시용 정수 지배율. 내림이라 100% 전에는 100이 나오지 않는다.</summary>
+    public int DominancePercent(int slot) => Mathf.FloorToInt(Dominance[slot]);
+
     private bool _retryRequested;
     private bool _startRequested;
     private int _lastPlayerCount;
+    private Renderer[] _zoneRenderers;
+    private int _shownZone = -1;
 
     public override void Spawned()
     {
         Instance = this;
 
+        // 두 플레이어는 서로의 이동을 막지 않는다.
+        Physics.IgnoreLayerCollision(NCPlayer.Layer, NCPlayer.Layer, true);
+
+        if (startZone != null)
+        {
+            _zoneRenderers = startZone.GetComponentsInChildren<Renderer>();
+        }
+
         if (Object.HasStateAuthority)
         {
             Phase = NCPhase.Lobby;
-            TotalRooms = NCCombatRoom.All.Count;
-            BestCentisec = PlayerPrefs.GetInt(NCBalance.Get.recordKey, 0);
+            WinnerSlot = -1;
         }
     }
 
@@ -114,7 +126,7 @@ public class NCSession : NetworkBehaviour
         }
     }
 
-    /// <summary>결과 화면의 [재도전]. 호스트만 의미가 있다(다음 Tick에 처리).</summary>
+    /// <summary>결과 화면의 [대기실로]. 호스트만.</summary>
     public void RequestRetry()
     {
         if (Object != null && Object.HasStateAuthority && IsFinished)
@@ -123,7 +135,7 @@ public class NCSession : NetworkBehaviour
         }
     }
 
-    /// <summary>대기실의 [게임 시작]. 호스트만 의미가 있다(다음 Tick에 조건을 검사해 한 번만 수락).</summary>
+    /// <summary>대기실의 [게임 시작]. 호스트만.</summary>
     public void RequestStart()
     {
         if (Object != null && Object.HasStateAuthority && Phase == NCPhase.Lobby)
@@ -132,7 +144,6 @@ public class NCSession : NetworkBehaviour
         }
     }
 
-    /// <summary>대기실에서 게임을 시작할 수 있는지(필요 인원이 모두 준비).</summary>
     public bool CanStart
     {
         get
@@ -140,10 +151,7 @@ public class NCSession : NetworkBehaviour
             int ready = 0;
             foreach (NCPlayer player in NCPlayer.All)
             {
-                if (player.Ready)
-                {
-                    ready++;
-                }
+                ready += player.Ready ? 1 : 0;
             }
 
             int count = NCPlayer.All.Count;
@@ -158,27 +166,14 @@ public class NCSession : NetworkBehaviour
             return;
         }
 
-        if (_retryRequested)
-        {
-            _retryRequested = false;
-            ResetMission();
-            return;
-        }
-
-        CountPlayers(out int count, out int inZone, out bool allDown);
-        PlayerCount = count;
-        PlayersInZone = inZone;
-
-        // 게임 중 동료가 나가면 의뢰를 중단하고 대기실로 돌아간다.
-        if (Phase != NCPhase.Lobby && count < _lastPlayerCount)
-        {
-            _lastPlayerCount = count;
-            PartnerLeftCount++;
-            ResetMission();
-            return;
-        }
-
+        int count = NCPlayer.All.Count;
+        bool someoneLeft = count < _lastPlayerCount;
         _lastPlayerCount = count;
+
+        if (someoneLeft)
+        {
+            HandleLeave();
+        }
 
         switch (Phase)
         {
@@ -189,182 +184,259 @@ public class NCSession : NetworkBehaviour
 
                     if (CanStart)
                     {
-                        foreach (NCPlayer player in NCPlayer.All)
-                        {
-                            player.Ready = false;
-                        }
-
-                        Phase = NCPhase.Entrance;
-                        Debug.Log("[NCSession] 대기실 → 저택 입구");
+                        StartCountdown();
                     }
                 }
                 break;
 
-            case NCPhase.Entrance:
-                if (count >= NCBalance.Get.RequiredPlayers && inZone == count)
+            case NCPhase.Countdown:
+                if (PhaseTimer.Expired(Runner))
                 {
-                    StartMission();
+                    Phase = NCPhase.Playing;
+                    PhaseTimer = TickTimer.CreateFromSeconds(Runner, NCBalance.Get.matchSeconds);
+                    Debug.Log("[NCSession] 경기 시작");
                 }
                 break;
 
             case NCPhase.Playing:
-                Judge(allDown);
+                TickMatch();
+                break;
+
+            case NCPhase.Result:
+                if (_retryRequested)
+                {
+                    ResetMatch();
+                    Phase = NCPhase.Lobby;
+                }
+                break;
+        }
+
+        _retryRequested = false;
+    }
+
+    private void HandleLeave()
+    {
+        switch (Phase)
+        {
+            case NCPhase.Lobby:
+                PartnerLeftCount++;
+                break;
+
+            case NCPhase.Countdown:
+                PartnerLeftCount++;
+                ResetMatch();
+                Phase = NCPhase.Lobby;
+                break;
+
+            case NCPhase.Playing:
+                // 호스트가 남아 있어야 이 코드가 돌므로 남은 사람이 호스트다.
+                Finish(NCPlayer.Local != null ? NCPlayer.Local.Slot : 0, NCEndCause.OpponentLeft);
                 break;
         }
     }
 
-    private void StartMission()
+    private void StartCountdown()
     {
-        Phase = NCPhase.Playing;
-        Cause = NCDefeatCause.None;
-        MissionTimer = TickTimer.CreateFromSeconds(Runner, NCBalance.Get.missionSeconds);
-        _wasDown.Clear();
-        Debug.Log("[NCSession] 의뢰 시작");
-    }
+        ResetMatch();
+        Phase = NCPhase.Countdown;
+        PhaseTimer = TickTimer.CreateFromSeconds(Runner, NCBalance.Get.countdownSeconds);
 
-    private void Judge(bool allDown)
-    {
-        ClearedRooms = CountClearedRooms();
-
-        if (allDown)
+        foreach (NCGhostCamp camp in NCGhostCamp.All)
         {
-            Finish(NCPhase.Defeat, NCDefeatCause.AllDown);
-        }
-        else if (TotalRooms > 0 && ClearedRooms >= TotalRooms)
-        {
-            Finish(NCPhase.Victory, NCDefeatCause.None);
-        }
-        else if (MissionTimer.Expired(Runner))
-        {
-            Finish(NCPhase.Defeat, NCDefeatCause.TimeUp);
+            camp.ServerStart();
         }
     }
 
-    private void Finish(NCPhase result, NCDefeatCause cause)
+    private void TickMatch()
     {
-        float total = NCBalance.Get.missionSeconds;
-        float elapsed = Mathf.Clamp(total - RemainingSeconds, 0f, total);
-        ElapsedCentisec = Mathf.FloorToInt(elapsed * 100f);
-
-        // 성공 기록만 호스트 PC에 저장한다. 같은 표시 시간은 신기록이 아니다.
-        if (result == NCPhase.Victory && (BestCentisec <= 0 || ElapsedCentisec < BestCentisec))
+        // ① 피해를 모두 모은 뒤 한꺼번에 확정 → 사망·부활·회복
+        NCBulletSystem bullets = NCBulletSystem.Instance;
+        if (bullets != null)
         {
-            BestCentisec = ElapsedCentisec;
-            IsNewRecord = true;
-            PlayerPrefs.SetInt(NCBalance.Get.recordKey, ElapsedCentisec);
-            PlayerPrefs.Save();
+            bullets.ServerStep();
         }
 
-        Phase = result;
+        NCGhost.ServerTickAll();
+
+        if (bullets != null)
+        {
+            bullets.ServerApplyHits();
+        }
+
+        foreach (NCPlayer player in NCPlayer.All)
+        {
+            player.Health.ServerTick();
+        }
+
+        // ② 캠프 전멸·보상
+        foreach (NCGhostCamp camp in NCGhostCamp.All)
+        {
+            camp.ServerTick();
+        }
+
+        // ③ 점령 인원
+        bool a = false;
+        bool b = false;
+
+        foreach (NCPlayer player in NCPlayer.All)
+        {
+            if (player.Health.IsDown || IsInZone(player.transform.position) == false)
+            {
+                continue;
+            }
+
+            player.Health.ServerEndProtection();
+            ZoneSeconds.Set(player.Slot, ZoneSeconds[player.Slot] + Runner.DeltaTime);
+            a |= player.Slot == 0;
+            b |= player.Slot == 1;
+        }
+
+        Zone = a && b ? NCZoneState.Contested : (a ? NCZoneState.SlotA : (b ? NCZoneState.SlotB : NCZoneState.Empty));
+
+        // ④ 지배율
+        if (a != b)
+        {
+            int slot = a ? 0 : 1;
+            float next = Dominance[slot] + NCBalance.Get.dominancePerSecond * Runner.DeltaTime;
+            Dominance.Set(slot, Mathf.Min(WinDominance, next));
+        }
+
+        // ⑤ 100% → 시간 종료 순서로 검사
+        if (Dominance[0] >= WinDominance)
+        {
+            Finish(0, NCEndCause.Dominance);
+        }
+        else if (Dominance[1] >= WinDominance)
+        {
+            Finish(1, NCEndCause.Dominance);
+        }
+        else if (PhaseTimer.Expired(Runner))
+        {
+            float diff = Dominance[0] - Dominance[1];
+            if (diff == 0f)
+            {
+                Finish(-1, NCEndCause.Draw);
+            }
+            else
+            {
+                Finish(diff > 0f ? 0 : 1, NCEndCause.TimeUp);
+            }
+        }
+    }
+
+    // ───────── 통계 (Host 전용) ─────────
+
+    public void ServerCountShot(int slot) => Shots.Set(slot, Shots[slot] + 1);
+    public void ServerCountHit(int slot) => Hits.Set(slot, Hits[slot] + 1);
+    public void ServerCountLastHit(int slot) => LastHits.Set(slot, LastHits[slot] + 1);
+
+    /// <summary>killerSlot이 -1이면 유령에게 죽은 것.</summary>
+    public void ServerCountKill(int killerSlot, int victimSlot)
+    {
+        Deaths.Set(victimSlot, Deaths[victimSlot] + 1);
+
+        if (killerSlot >= 0)
+        {
+            Kills.Set(killerSlot, Kills[killerSlot] + 1);
+        }
+    }
+
+    public bool IsInZone(Vector3 position)
+    {
+        return startZone != null && NCMath.FlatDistance(position, startZone.position) <= NCBalance.Get.captureRadius;
+    }
+
+    private void Finish(int winner, NCEndCause cause)
+    {
+        FinalRemaining = RemainingSeconds;
+        WinnerSlot = winner;
         Cause = cause;
-        MissionTimer = TickTimer.None;
+        Phase = NCPhase.Result;
+        PhaseTimer = TickTimer.None;
 
-        foreach (NCCombatRoom room in NCCombatRoom.All)
+        if (NCBulletSystem.Instance != null)
         {
-            room.ServerHalt();
+            NCBulletSystem.Instance.ServerClear();
         }
+
+        NCGhost.ServerStopAll();
 
         foreach (NCPlayer player in NCPlayer.All)
         {
-            player.Gun.ServerEndOvercharge();
-        }
-
-        NCGhost.ServerDespawnAll(Runner);
-        Debug.Log($"[NCSession] 결과: {result} {cause} {ElapsedCentisec / 100f:0.00}초 다운 {TeamDownCount}회");
-    }
-
-    /// <summary>재도전·동료 이탈: 유령 제거 → 방 초기화 → 플레이어 풀피·탄창·입구 위치·준비 해제 → 대기실.</summary>
-    private void ResetMission()
-    {
-        NCGhost.ServerDespawnAll(Runner);
-
-        foreach (NCCombatRoom room in NCCombatRoom.All)
-        {
-            room.ServerReset();
-        }
-
-        foreach (NCSupplyBox box in NCSupplyBox.All)
-        {
-            box.ServerReset();
-        }
-
-        CombatStarted = false;
-
-        foreach (NCPlayer player in NCPlayer.All)
-        {
-            player.Health.ServerResetFull();
-            player.Gun.ServerRefill();
             player.Gun.ServerResetCharges();
             player.Ready = false;
-
-            Transform point = NCLauncher.Instance != null ? NCLauncher.Instance.GetEntrySpawn(player.Slot) : null;
-            if (point != null)
-            {
-                player.ServerTeleport(point.position, point.rotation);
-            }
         }
 
-        Phase = NCPhase.Lobby;
-        Cause = NCDefeatCause.None;
-        MissionTimer = TickTimer.None;
-        ClearedRooms = 0;
-        ElapsedCentisec = 0;
-        TeamDownCount = 0;
-        IsNewRecord = false;
-        _wasDown.Clear();
-        _startRequested = false;
-        Debug.Log("[NCSession] 대기실로");
+        Debug.Log($"[NCSession] 결과: 승자 {winner} {cause} A {Dominance[0]:0.00} B {Dominance[1]:0.00}");
     }
 
-    private void CountPlayers(out int count, out int inZone, out bool allDown)
+    /// <summary>경기 시작·대기실 복귀의 공통 초기화.</summary>
+    private void ResetMatch()
     {
-        count = 0;
-        inZone = 0;
-        int down = 0;
-        float radius = NCBalance.Get.startZoneRadius;
+        if (NCBulletSystem.Instance != null)
+        {
+            NCBulletSystem.Instance.ServerClear();
+        }
+
+        foreach (NCGhostCamp camp in NCGhostCamp.All)
+        {
+            camp.ServerReset();
+        }
+
+        NCGhost.ServerDespawnAll(Runner);
 
         foreach (NCPlayer player in NCPlayer.All)
         {
-            count++;
-            bool isDown = player.Health.IsDown;
-
-            if (isDown)
-            {
-                down++;
-            }
-
-            // 진행 중 "살아 있다가 다운된 순간"만 센다.
-            if (Phase == NCPhase.Playing)
-            {
-                if (isDown && _wasDown.TryGetValue(player.Object.InputAuthority, out bool was) && was == false)
-                {
-                    TeamDownCount++;
-                }
-
-                _wasDown[player.Object.InputAuthority] = isDown;
-            }
-
-            if (startZone != null && NCMath.FlatDistance(player.transform.position, startZone.position) <= radius)
-            {
-                inZone++;
-            }
+            player.Ready = false;
+            player.Health.ServerResetFull();
+            player.Gun.ServerResetAll();
+            player.ServerMoveToSpawn();
         }
 
-        allDown = count > 0 && down == count;
+        for (int slot = 0; slot < 2; slot++)
+        {
+            Dominance.Set(slot, 0f);
+            Kills.Set(slot, 0);
+            Deaths.Set(slot, 0);
+            LastHits.Set(slot, 0);
+            Shots.Set(slot, 0);
+            Hits.Set(slot, 0);
+            ZoneSeconds.Set(slot, 0f);
+        }
+
+        Zone = NCZoneState.Empty;
+        Cause = NCEndCause.None;
+        WinnerSlot = -1;
+        FinalRemaining = 0f;
+        PhaseTimer = TickTimer.None;
+        _startRequested = false;
     }
 
-    private static int CountClearedRooms()
+    public static Color ZoneColor(NCZoneState zone)
     {
-        int cleared = 0;
-
-        foreach (NCCombatRoom room in NCCombatRoom.All)
+        switch (zone)
         {
-            if (room.State == NCRoomState.Cleared)
-            {
-                cleared++;
-            }
+            case NCZoneState.SlotA: return NCStyle.P1;
+            case NCZoneState.SlotB: return NCStyle.P2;
+            case NCZoneState.Contested: return NCStyle.Danger;
+            default: return NCStyle.Text;
+        }
+    }
+
+    public override void Render()
+    {
+        if (_zoneRenderers == null || _shownZone == (int)Zone)
+        {
+            return;
         }
 
-        return cleared;
+        _shownZone = (int)Zone;
+        Color color = ZoneColor(Zone);
+
+        foreach (Renderer r in _zoneRenderers)
+        {
+            color.a = r.name == "Ring" ? 0.3f : 0.15f;
+            NCFx.SetColor(r, color);
+        }
     }
 }

@@ -16,13 +16,6 @@ public static class NCMath
         return v;
     }
 
-    /// <summary>1/100초 값을 MM:SS.cc 로 표시한다.</summary>
-    public static string FormatCentisec(int centisec)
-    {
-        int seconds = centisec / 100;
-        return $"{seconds / 60:00}:{seconds % 60:00}.{centisec % 100:00}";
-    }
-
     /// <summary>남은 시간(초)을 MM:SS 로 표시한다. 0 이상으로 제한한 뒤 올림.</summary>
     public static string FormatClock(float seconds)
     {

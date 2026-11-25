@@ -1,385 +1,145 @@
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
-/// 인게임 HUD(UI 기획서 02장). 왼쪽 상단은 비우고, 전투 중엔 시야를 가리지 않는다.
-///  - 상단 중앙: 남은 시간(MM:SS) · 아래 소탕 완료 N/M
-///  - 그 아래: 잠깐의 안내(MSG) / 입구에서는 의뢰 안내
-///  - 왼쪽 하단: 내 체력(크게) · 그 위 동료(작게, 다운 표시)
-///  - 오른쪽 하단: 탄약 n/12 · R 재장전 · 재장전 진행
-///  - 대상 근처: E 안내 하나 + 진행 바(정리·구조)
-///  - 아래 중앙(입구에서만): 기본 조작
+/// 인게임 HUD. 확정된 값을 읽어 그리기만 한다.
+///  - 상단 중앙: 남은 시간 · 점령 구역 상태, 양옆에 1P·2P 지배율
+///  - 머리 위 체력·탄창·대쉬(NCOverhead), 유령 체력(NCGhostBar), 오른쪽 하단 과충전(아트 프리팹 UI_Entry)
+///  - 카운트다운 큰 숫자, 부활 대기, 보호 표시, 짧은 알림
 /// </summary>
 public class NCHud
 {
     private readonly GameObject _root;
-    private readonly RectTransform _canvas;
+    private readonly NCEntryView _view; // 못 불러오면 null → Tick을 건너뛴다
 
-    // 상단
     private readonly TextMeshProUGUI _timeText;
-    private readonly TextMeshProUGUI _timeLabel;
-    private readonly TextMeshProUGUI _progressText;
-    private readonly GameObject _roomCode;
-    private readonly TextMeshProUGUI _roomCodeText;
+    private readonly TextMeshProUGUI _zoneText;
+    private readonly DominancePanel _dominanceA;
+    private readonly DominancePanel _dominanceB;
 
-    // 입구 안내
-    private readonly GameObject _entryGuide;
-    private readonly TextMeshProUGUI _entryStatus;
-    private readonly GameObject _controls;
+    private readonly NCOverhead[] _overheads;
+    private readonly List<NCGhostBar> _ghostBars = new List<NCGhostBar>();
+    private readonly RectTransform _rootRect;
 
-    // 알림
+    private readonly Image _chargeIcon;
+    private readonly TextMeshProUGUI _chargeText;
+    private readonly Image _chargeFill;
+    private readonly RectTransform _chargeBar;
+
+    private readonly TextMeshProUGUI _countdown;
+    private readonly GameObject _respawnPanel;
+    private readonly TextMeshProUGUI _respawnText;
+    private readonly Image _respawnFill;
+    private readonly Image _deathVignette;
+    private readonly GameObject _protectPanel;
+
     private readonly CanvasGroup _message;
     private readonly TextMeshProUGUI _messageText;
     private readonly Image _messageAccent;
     private float _messageUntil;
-    private int _messagePriority;
 
-    // 체력
-    private readonly HealthPanel _mine;
-    private readonly HealthPanel _mate;
+    private readonly NCMinimap _minimap;
+    private readonly NCHitFeedback _hitFeedback;
 
-    // 탄약
-    private readonly TextMeshProUGUI _ammoText;
-    private readonly TextMeshProUGUI _ammoHint;
-    private readonly TextMeshProUGUI _ammoMaxText; // [UI 프리팹 방식] 탄창 크기 '/12' (프리팹은 현재 탄약과 글자가 나뉘어 있음)
-    private readonly Image _reloadFill;
-    private readonly RectTransform _reloadBack;
-
-    // 상호작용 안내
-    private readonly RectTransform _prompt;
-    private readonly TextMeshProUGUI _promptText;
-    private readonly RectTransform _promptKey;
-    private readonly Image _promptFill;
-    private readonly RectTransform _promptBar;
-    private readonly GameObject _promptChips;
-    private readonly Image _chip1;
-    private readonly Image _chip2;
-
-    // 다운 화면
-    private readonly Image _downVignette;
-    private readonly GameObject _downPanel;
-    private readonly TextMeshProUGUI _downText;
-    private readonly Image _downFill;
-
-    // 값이 바뀔 때만 글자를 새로 만들기 위한 이전 값(매 프레임 문자열 생성 → GC 끊김 방지)
+    // 값이 바뀔 때만 글자를 새로 만든다(매 프레임 문자열 생성 방지).
     private int _shownSeconds = -1;
-    private int _shownEntrance = -1;
-    private int _shownCleared = -1;
-    private int _shownTotal = -1;
-    private string _shownCode;
-    private int _shownEntryKey = -1;
-    private int _shownAmmo = -1;
-    private int _shownAmmoState = -1;
-
-    // 과충전 패널
-    private Image _chargeIcon;
-    private TextMeshProUGUI _chargeText;
-    private Image _chargeFill;
-    private RectTransform _chargeBar;
+    private int _shownZone = -1;
     private int _shownChargeState = -1;
+    private int _shownChargeTenths = -1;
+    private int _shownCountdown = -1;
+    private int _shownRespawn = -1;
 
-    // 알림 감지(과충전·보급)
-    private int _lastCharges;
-    private readonly System.Collections.Generic.Dictionary<NCSupplyBox, NCSupplyState> _lastSupplyStates =
-        new System.Collections.Generic.Dictionary<NCSupplyBox, NCSupplyState>();
-    private int _lastSupplyUses;
-
-    private static NCHud _instance;
-
-    // [UI 프리팹 방식] 아트 프리팹(UI_Entry)의 참조. 못 불러오면 null → Tick을 건너뛴다.
-    private readonly NCEntryView _view;
-
-    // 미니맵 · 화면 밖 동료 방향 표식
-    private NCMinimap _minimap;
-    private RectTransform _mateArrow;
-    private RectTransform _mateArrowHead;
-    private TextMeshProUGUI _mateArrowLabel;
-    private Image _mateArrowBack;
-    private int _shownArrowState = -1;
-
-    // 알림 감지용(이전 프레임 값)
-    private readonly System.Collections.Generic.Dictionary<NCCombatRoom, NCRoomState> _lastRoomStates =
-        new System.Collections.Generic.Dictionary<NCCombatRoom, NCRoomState>();
-    private bool _lastMateDown;
-    private int _lastReviveTotal;
+    private readonly Dictionary<NCGhostCamp, int> _seenRewards = new Dictionary<NCGhostCamp, int>();
+    private readonly Dictionary<NCGhostCamp, bool> _seenActive = new Dictionary<NCGhostCamp, bool>();
+    private bool _wasPlaying;
 
     public NCHud(RectTransform canvas)
     {
-        _canvas = canvas;
-        _instance = this;
         RectTransform root = NCUiKit.NewRect("Hud", canvas);
         NCUiKit.Stretch(root);
         _root = root.gameObject;
+        _rootRect = root;
 
-        // 다운 비네트(가장 아래)
-        _downVignette = NCUiKit.NewImage("DownVignette", root, null, new Color(0.6f, 0.05f, 0.1f, 0.22f));
-        NCUiKit.Stretch(_downVignette.rectTransform);
+        _deathVignette = NCUiKit.NewImage("DeathVignette", root, null, new Color(0.6f, 0.05f, 0.1f, 0.2f));
+        NCUiKit.Stretch(_deathVignette.rectTransform);
 
-        // [UI 프리팹 방식] 아트 프리팹(Variant)을 불러와 HUD 아래에 생성한다. (NCConnectScreen과 같은 패턴)
-        // 프리팹에 있는 것: 시간·소탕 완료·의뢰 안내·기본 조작·체력·탄약·과충전
-        // 프리팹에 없는 것(방 코드·알림·E 안내·다운 화면·미니맵·동료 방향)은 아래에서 기존처럼 코드로 만든다.
-        GameObject entryPrefab = Resources.Load<GameObject>("UI/Scenes/UI_Entry");
-        _view = entryPrefab != null ? Object.Instantiate(entryPrefab, root, false).GetComponent<NCEntryView>() : null;
+        GameObject prefab = Resources.Load<GameObject>("UI/Scenes/UI_Entry");
+        _view = prefab != null ? Object.Instantiate(prefab, root, false).GetComponent<NCEntryView>() : null;
         if (_view == null)
         {
             Debug.LogError("[UI] UI_Entry 프리팹 또는 루트의 NCEntryView를 찾을 수 없음 — 경로·Variant 확인");
             return;
         }
 
-        // 프리팹 루트를 화면 전체에 맞춘다 (Scale 0·크기 0 방지)
         RectTransform entryRect = (RectTransform)_view.transform;
         NCUiKit.Stretch(entryRect);
         entryRect.localScale = Vector3.one;
         entryRect.anchoredPosition3D = Vector3.zero;
 
-        // ── 상단 중앙: 시간 · 소탕 완료 (프리팹) ──
-        _timeLabel = _view.TimeLabel;
+        AddDashGuide((RectTransform)_view.Controls.transform);
+
+        // 상단
         _timeText = _view.TimeText;
-        _progressText = _view.ProgressText;
+        _view.TimeLabel.text = "남은 시간";
+        _zoneText = _view.ProgressText;
+        _dominanceA = new DominancePanel(root, 0);
+        _dominanceB = new DominancePanel(root, 1);
 
-        // 방 코드(입구에서만, 오른쪽 위)
-        RectTransform code = NCUiKit.NewPanel("RoomCode", root, deep: true);
-        // 미니맵(오른쪽 위) 아래에 둔다.
-        NCUiKit.Place(code, new Vector2(1f, 1f), new Vector2(-NCStyle.Margin, -NCStyle.Margin - 246f - NCStyle.Gap), new Vector2(260f, 52f));
-        _roomCodeText = NCUiKit.NewText("Text", code, "방 코드", 22f, NCStyle.Text);
-        NCUiKit.Stretch(_roomCodeText.rectTransform);
-        _roomCode = code.gameObject;
-
-        // ── 입구 안내 · 기본 조작 (프리팹) ──
-        // 이동 안내 문구(_entryStatus, ENTRY-02)는 프리팹에 없어 지금은 생략 → null이면 TickEntrance가 건너뛴다
-        _entryStatus = null;
-        _entryGuide = _view.EntryGuide;
-        _controls = _view.Controls;
-
-        // ── 알림(MSG) ──
+        // 알림
         RectTransform message = NCUiKit.NewPanel("Message", root, deep: true);
-        NCUiKit.Place(message, new Vector2(0.5f, 1f), new Vector2(0f, -184f), new Vector2(480f, 60f));
+        NCUiKit.Place(message, new Vector2(0.5f, 1f), new Vector2(0f, -190f), new Vector2(520f, 60f));
         _messageAccent = message.Find("Frame").GetComponent<Image>();
         _messageText = NCUiKit.NewText("Text", message, "", NCStyle.FontGuide, NCStyle.Text, style: FontStyles.Bold);
         NCUiKit.Stretch(_messageText.rectTransform);
         _message = message.gameObject.AddComponent<CanvasGroup>();
         _message.alpha = 0f;
 
-        // ── 체력(왼쪽 하단) ──
-        // [UI 프리팹 방식] 프리팹대로 패널 번호가 고정: 1P 패널 = 1P 플레이어, 2P 패널 = 2P 플레이어
-        // (기획서 02장의 "내 체력은 아래 큰 패널"과 다름 — 팀 결정으로 프리팹 우선)
-        _mine = new HealthPanel(_view.Health1P);
-        _mate = new HealthPanel(_view.Health2P);
+        // 머리 위 체력·탄창은 다른 HUD 뒤에 그린다.
+        _overheads = new[] { new NCOverhead(root, 0), new NCOverhead(root, 1) };
+        root.Find("Overhead1").SetAsFirstSibling();
+        root.Find("Overhead0").SetAsFirstSibling();
 
-        // ── 탄약(프리팹) ── 재장전 진행 바는 프리팹에 없어 탄약 패널 아래쪽에 코드로 붙인다
-        RectTransform ammo = _view.AmmoPanel;
-        _ammoText = _view.AmmoText;
-        _ammoMaxText = _view.AmmoMaxText;
-        _ammoHint = _view.AmmoHint;
-        _reloadFill = NCUiKit.NewBar("ReloadBar", ammo, NCStyle.Text, out _reloadBack);
-        NCUiKit.Place(_reloadBack, new Vector2(0.5f, 0f), new Vector2(0f, 18f), new Vector2(ammo.sizeDelta.x - 40f, 12f));
-
-        BuildChargePanel(root);
-
-        _minimap = new NCMinimap(root);
-        BuildMateArrow(root);
-
-        // ── 상호작용 안내 ──
-        _prompt = NCUiKit.NewPanel("Prompt", root, deep: true);
-        _prompt.anchorMin = _prompt.anchorMax = new Vector2(0.5f, 0.5f);
-        _prompt.pivot = new Vector2(0.5f, 0f);
-        _prompt.sizeDelta = new Vector2(340f, 96f);
-        _promptKey = NCUiKit.NewKeyCap("Key", _prompt, "E", 30f);
-        NCUiKit.Place(_promptKey, new Vector2(0f, 1f), new Vector2(14f, -12f), _promptKey.sizeDelta);
-        _promptText = NCUiKit.NewText("Text", _prompt, "", 22f, NCStyle.Text, TextAlignmentOptions.Left);
-        NCUiKit.Place(_promptText.rectTransform, new Vector2(0f, 1f), new Vector2(56f, -12f), new Vector2(270f, 30f));
-        _promptChips = NCUiKit.NewRect("Chips", _prompt).gameObject;
-        RectTransform chips = (RectTransform)_promptChips.transform;
-        NCUiKit.Place(chips, new Vector2(0.5f, 0f), new Vector2(0f, 30f), new Vector2(200f, 26f));
-        _chip1 = BuildChip(chips, 0, new Vector2(-50f, 0f));
-        _chip2 = BuildChip(chips, 1, new Vector2(50f, 0f));
-        _promptFill = NCUiKit.NewBar("Bar", _prompt, NCStyle.P1, out _promptBar);
-        NCUiKit.Place(_promptBar, new Vector2(0.5f, 0f), new Vector2(0f, 10f), new Vector2(310f, 14f));
-
-        // ── 다운 안내(가운데 아래) ──
-        RectTransform down = NCUiKit.NewPanel("DownPanel", root, deep: true);
-        NCUiKit.Place(down, new Vector2(0.5f, 0f), new Vector2(0f, 200f), new Vector2(560f, 92f));
-        down.Find("Frame").GetComponent<Image>().color = NCStyle.Danger;
-        _downText = NCUiKit.NewText("Text", down, "다운 · 동료의 구조를 기다리세요", NCStyle.FontGuide, NCStyle.Text, style: FontStyles.Bold);
-        NCUiKit.Place(_downText.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -12f), new Vector2(540f, 36f));
-        _downFill = NCUiKit.NewBar("Bar", down, NCStyle.Success, out RectTransform downBar);
-        NCUiKit.Place(downBar, new Vector2(0.5f, 0f), new Vector2(0f, 14f), new Vector2(500f, 16f));
-        _downPanel = down.gameObject;
-    }
-
-    /// <summary>과충전 패널(UI 기획서 10장): 같은 아이콘의 밝기·테두리로 충전 없음 / 준비 / 사용 중을 구분하고 문구를 함께 쓴다.</summary>
-    private void BuildChargePanel(RectTransform root)
-    {
-        // [UI 프리팹 방식] 아이콘·글자는 프리팹(Overcharge_panel)을 쓰고, 효과 남은 바만 코드로 붙인다.
-        // 아트 아이콘은 테두리(링)가 따로 없어 링(_chargeRing)은 없앴다 → 상태는 아이콘 밝기·색 + 문구로 구분.
-        RectTransform panel = _view.ChargePanel;
+        // 과충전 (프리팹)
         _chargeIcon = _view.ChargeIcon;
         _chargeText = _view.ChargeText;
-
-        _chargeFill = NCUiKit.NewBar("Bar", panel, NCStyle.P1, out _chargeBar);
+        _chargeFill = NCUiKit.NewBar("Bar", _view.ChargePanel, NCStyle.ShotOvercharge, out _chargeBar);
         NCUiKit.Place(_chargeBar, new Vector2(0.5f, 0f), new Vector2(0f, 6f), new Vector2(160f, 12f));
+
+        _minimap = new NCMinimap(root);
+        _hitFeedback = new NCHitFeedback(root, ShowMessage);
+
+        // 카운트다운
+        _countdown = NCUiKit.NewText("Countdown", root, "", 180f, NCStyle.Text, style: FontStyles.Bold);
+        NCUiKit.Place(_countdown.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, 120f), new Vector2(400f, 220f));
+
+        // 부활 대기
+        RectTransform respawn = NCUiKit.NewPanel("Respawn", root, deep: true);
+        NCUiKit.Place(respawn, new Vector2(0.5f, 0f), new Vector2(0f, 200f), new Vector2(460f, 92f));
+        respawn.Find("Frame").GetComponent<Image>().color = NCStyle.Danger;
+        _respawnText = NCUiKit.NewText("Text", respawn, "", NCStyle.FontGuide, NCStyle.Text, style: FontStyles.Bold);
+        NCUiKit.Place(_respawnText.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -12f), new Vector2(440f, 36f));
+        _respawnFill = NCUiKit.NewBar("Bar", respawn, NCStyle.Success, out RectTransform respawnBar);
+        NCUiKit.Place(respawnBar, new Vector2(0.5f, 0f), new Vector2(0f, 14f), new Vector2(400f, 16f));
+        _respawnPanel = respawn.gameObject;
+
+        // 보호
+        RectTransform protect = NCUiKit.NewPanel("Protect", root, deep: true);
+        NCUiKit.Place(protect, new Vector2(0.5f, 0f), new Vector2(0f, 200f), new Vector2(420f, 48f));
+        TextMeshProUGUI protectText = NCUiKit.NewText("Text", protect, "부활 보호 중 · 사격하면 해제", 22f, NCStyle.Text);
+        NCUiKit.Stretch(protectText.rectTransform);
+        _protectPanel = protect.gameObject;
     }
 
-    private void TickCharge(NCPlayer me)
+    /// <summary>카운트다운 조작 안내의 빈 칸(아랫줄 왼쪽)에 대쉬를 넣는다.</summary>
+    private static void AddDashGuide(RectTransform controls)
     {
-        if (me == null || me.Gun == null || me.Object == null || me.Object.IsValid == false)
-        {
-            return;
-        }
+        RectTransform key = NCUiKit.NewKeyCap("KeyDash", controls, "Space", 34f);
+        NCUiKit.Place(key, new Vector2(0.5f, 0.5f), new Vector2(-225f, -39f), key.sizeDelta);
 
-        NCGun gun = me.Gun;
-        bool active = gun.IsOvercharged;
-        bool allowed = NCGun.IsOverchargeAllowed && me.Health.IsDown == false;
-
-        // 0 = 충전 없음, 1 = 준비(지금 사용 가능), 2 = 보유했지만 지금은 못 씀, 3 = 사용 중
-        int state = active ? 3 : (gun.Charges > 0 ? (allowed ? 1 : 2) : 0);
-
-        if (state != _shownChargeState)
-        {
-            _shownChargeState = state;
-
-            switch (state)
-            {
-                // [UI 프리팹 방식] 아트 아이콘은 흰색이 원래 모습이라, 밝기(알파)·색으로 상태를 나타낸다.
-                case 0:
-                    _chargeText.text = "충전 없음";
-                    _chargeText.color = NCStyle.TextDim;
-                    _chargeIcon.color = new Color(1f, 1f, 1f, 0.3f);
-                    break;
-                case 1:
-                    _chargeText.text = "과충전 준비";
-                    _chargeText.color = NCStyle.P1;
-                    _chargeIcon.color = Color.white;
-                    break;
-                case 2:
-                    _chargeText.text = "전투 중 사용 가능";
-                    _chargeText.color = NCStyle.Text;
-                    _chargeIcon.color = new Color(1f, 1f, 1f, 0.6f);
-                    break;
-                default:
-                    _chargeText.text = "과충전 사용 중";
-                    _chargeText.color = Color.white;
-                    _chargeIcon.color = NCStyle.P1;
-                    break;
-            }
-        }
-
-        // 준비 상태는 은은하게 깜빡여 눈에 띄게
-        if (state == 1)
-        {
-            _chargeIcon.color = Color.Lerp(Color.white, NCStyle.P1, Mathf.PingPong(Time.time * 2f, 1f) * 0.6f);
-        }
-
-        _chargeBar.gameObject.SetActive(active);
-        NCUiKit.SetBar(_chargeFill, gun.OverchargeRatio);
-    }
-
-    // ───────── 화면 밖 동료 방향 표식(UI 기획서 11장) ─────────
-
-    private void BuildMateArrow(RectTransform root)
-    {
-        _mateArrow = NCUiKit.NewRect("MateArrow", root);
-        _mateArrow.anchorMin = _mateArrow.anchorMax = new Vector2(0.5f, 0.5f);
-        _mateArrow.sizeDelta = new Vector2(76f, 76f);
-
-        _mateArrowBack = NCUiKit.NewImage("Back", _mateArrow, NCUiKit.CircleSprite, NCStyle.PanelDeep);
-        NCUiKit.Place(_mateArrowBack.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(54f, 54f));
-
-        // 원 둘레를 도는 삼각형이 동료 쪽을 가리킨다.
-        _mateArrowHead = NCUiKit.NewRect("HeadPivot", _mateArrow);
-        NCUiKit.Place(_mateArrowHead, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(76f, 76f));
-        TextMeshProUGUI head = NCUiKit.NewText("Head", _mateArrowHead, "▲", 22f, NCStyle.P2);
-        NCUiKit.Place(head.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, 4f), new Vector2(30f, 26f));
-
-        _mateArrowLabel = NCUiKit.NewText("Label", _mateArrow, "2P", 18f, NCStyle.P2, style: FontStyles.Bold);
-        NCUiKit.Place(_mateArrowLabel.rectTransform, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(54f, 54f));
-
-        _mateArrow.gameObject.SetActive(false);
-    }
-
-    private void TickMateArrow(NCPlayer me)
-    {
-        NCPlayer mate = null;
-        foreach (NCPlayer player in NCPlayer.All)
-        {
-            if (player != me && player.Object != null && player.Object.IsValid)
-            {
-                mate = player;
-            }
-        }
-
-        Camera cam = Camera.main;
-        if (mate == null || me == null || cam == null)
-        {
-            _mateArrow.gameObject.SetActive(false);
-            return;
-        }
-
-        Vector3 screen = cam.WorldToScreenPoint(mate.transform.position + Vector3.up);
-        bool behind = screen.z < 0f;
-        if (behind)
-        {
-            screen = -screen;
-        }
-
-        float margin = 40f;
-        bool onScreen = behind == false && screen.x > margin && screen.x < Screen.width - margin && screen.y > margin && screen.y < Screen.height - margin;
-        _mateArrow.gameObject.SetActive(onScreen == false);
-
-        if (onScreen)
-        {
-            return;
-        }
-
-        // 화면 중심 → 동료 방향으로, 안전 영역 가장자리에 붙인다.
-        Vector2 center = new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
-        Vector2 dir = ((Vector2)screen - center).normalized;
-        if (dir.sqrMagnitude < 0.001f)
-        {
-            dir = Vector2.up;
-        }
-
-        Vector2 half = _canvas.rect.size * 0.5f - new Vector2(90f, 90f);
-        float scale = Mathf.Min(Mathf.Abs(half.x / Mathf.Max(0.001f, Mathf.Abs(dir.x))), Mathf.Abs(half.y / Mathf.Max(0.001f, Mathf.Abs(dir.y))));
-        _mateArrow.anchoredPosition = dir * scale;
-        _mateArrowHead.localRotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg - 90f);
-
-        // 다운된 동료는 붉게 "구조"로 알린다.
-        int state = mate.Health.IsDown ? 1 : 0;
-        if (state != _shownArrowState || _mateArrowLabel.color.a <= 0f)
-        {
-            _shownArrowState = state;
-            Color color = state == 1 ? NCStyle.Danger : mate.SlotColor;
-            _mateArrowLabel.text = state == 1 ? "구조" : mate.SlotLabel;
-            _mateArrowLabel.color = color;
-            _mateArrowHead.GetComponentInChildren<TextMeshProUGUI>().color = color;
-        }
-
-        if (state == 1)
-        {
-            _mateArrowBack.color = Color.Lerp(NCStyle.PanelDeep, NCStyle.Danger, Mathf.PingPong(Time.time * 3f, 1f) * 0.6f);
-        }
-        else
-        {
-            _mateArrowBack.color = NCStyle.PanelDeep;
-        }
-    }
-
-    /// <summary>다른 스크립트가 이 PC 화면에 잠깐 안내를 띄울 때(예: 보급함 "체력이 충분합니다").</summary>
-    public static void Notify(string text, Color accent)
-    {
-        if (_instance == null || _instance._view == null) return; // 프리팹을 못 불러왔으면 건너뜀
-        _instance.ShowMessage(text, NCBalance.Get.messageSeconds, 3, accent);
-    }
-
-    private static Image BuildChip(RectTransform parent, int slot, Vector2 position)
-    {
-        RectTransform tag = NCUiKit.NewSlotTag("Chip" + slot, parent, slot, 26f);
-        NCUiKit.Place(tag, new Vector2(0.5f, 0.5f), position, tag.sizeDelta);
-        TextMeshProUGUI e = NCUiKit.NewText("E", tag, "E", 16f, NCStyle.PanelDeep, style: FontStyles.Bold);
-        NCUiKit.Place(e.rectTransform, new Vector2(1f, 0.5f), new Vector2(18f, 0f), new Vector2(20f, 26f));
-        return tag.GetComponent<Image>();
+        TextMeshProUGUI text = NCUiKit.NewText("DashText", controls, "대쉬", NCStyle.FontGuide, NCStyle.Text, TextAlignmentOptions.Left, FontStyles.Bold);
+        NCUiKit.Place(text.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(-110f, -36f), new Vector2(90f, 34f));
     }
 
     public void SetVisible(bool visible)
@@ -387,36 +147,81 @@ public class NCHud
         if (_root.activeSelf != visible)
         {
             _root.SetActive(visible);
+            _hitFeedback?.Clear();
         }
     }
 
-    // ───────── 매 프레임 ─────────
-
     public void Tick(NCSession session, NCLauncher launcher)
     {
-        if (_view == null) return; // 프리팹을 못 불러왔으면 아무것도 안 함
+        if (_view == null)
+        {
+            return;
+        }
 
-        bool sessionReady = session != null && session.Object != null && session.Object.IsValid;
+        bool ready = session != null && session.Object != null && session.Object.IsValid;
         NCPlayer me = NCPlayer.Local;
-        bool playing = sessionReady && session.Phase == NCPhase.Playing;
-        bool entrance = sessionReady && session.Phase == NCPhase.Entrance;
+        bool meReady = me != null && me.Object != null && me.Object.IsValid;
 
-        TickTop(session, sessionReady, launcher, entrance);
-        TickEntrance(session, entrance);
-        TickHealth(me);
-        TickAmmo(me);
-        TickCharge(me);
-        _minimap.Tick(me);
-        TickMateArrow(me);
-        TickPrompt(me, playing);
-        TickDown(me);
-        DetectEvents(session, me, playing);
-        TickMessage();
+        TickTop(session, ready);
+        _minimap.Tick(me, session);
+
+        bool playing = ready && session.IsPlaying;
+        bool down = meReady && playing && me.Health.IsDown;
+        _deathVignette.enabled = down;
+        _respawnPanel.SetActive(down);
+        _protectPanel.SetActive(meReady && playing && me.Health.IsProtected);
+
+        if (meReady)
+        {
+            TickCharge(me.Gun);
+
+            if (down)
+            {
+                float remaining = me.Health.RespawnRemaining;
+                int seconds = Mathf.CeilToInt(remaining);
+                if (seconds != _shownRespawn)
+                {
+                    _shownRespawn = seconds;
+                    _respawnText.text = $"{seconds}초 후 부활";
+                }
+
+                NCUiKit.SetBar(_respawnFill, 1f - remaining / NCBalance.Get.respawnSeconds);
+            }
+        }
+
+        DetectEvents(session, playing);
+        _message.alpha = Mathf.MoveTowards(_message.alpha, Time.time < _messageUntil ? 1f : 0f, Time.deltaTime * 6f);
     }
 
-    private void TickTop(NCSession session, bool ready, NCLauncher launcher, bool entrance)
+    /// <summary>카메라가 움직인 뒤 머리 위 표시를 옮긴다(LateUpdate).</summary>
+    public void LateTick()
     {
-        float remaining = ready ? session.RemainingSeconds : NCBalance.Get.missionSeconds;
+        if (_view == null || _root.activeSelf == false)
+        {
+            return;
+        }
+
+        foreach (NCOverhead overhead in _overheads)
+        {
+            overhead.Tick();
+        }
+
+        _hitFeedback.LateTick();
+
+        while (_ghostBars.Count < NCGhost.All.Count)
+        {
+            _ghostBars.Add(new NCGhostBar(_rootRect));
+        }
+
+        for (int i = 0; i < _ghostBars.Count; i++)
+        {
+            _ghostBars[i].Tick(i < NCGhost.All.Count ? NCGhost.All[i] : null);
+        }
+    }
+
+    private void TickTop(NCSession session, bool ready)
+    {
+        float remaining = ready ? session.RemainingSeconds : NCBalance.Get.matchSeconds;
         int seconds = Mathf.CeilToInt(Mathf.Max(0f, remaining));
         if (seconds != _shownSeconds)
         {
@@ -424,473 +229,175 @@ public class NCHud
             _timeText.text = NCMath.FormatClock(seconds);
         }
 
-        int entranceKey = entrance ? 1 : 0;
-        if (entranceKey != _shownEntrance)
-        {
-            _shownEntrance = entranceKey;
-            _timeLabel.text = entrance ? "남은 시간 · 시작 전" : "남은 시간";
-        }
-
-        // 60초 이하는 붉게 깜빡여 강조
-        bool urgent = ready && session.Phase == NCPhase.Playing && remaining <= 60f;
+        bool urgent = ready && session.IsPlaying && remaining <= 30f;
         _timeText.color = urgent ? Color.Lerp(NCStyle.Danger, NCStyle.Text, Mathf.PingPong(Time.time * 2f, 1f)) : NCStyle.Text;
 
-        int total = ready ? Mathf.Max(1, session.TotalRooms) : NCCombatRoom.All.Count;
-        int cleared = ready ? CountCleared() : 0;
-        if (cleared != _shownCleared || total != _shownTotal)
-        {
-            _shownCleared = cleared;
-            _shownTotal = total;
-            _progressText.text = $"소탕 완료 {cleared}/{total}";
-        }
+        bool countdown = ready && session.Phase == NCPhase.Countdown;
+        _view.Controls.SetActive(countdown);
+        _countdown.gameObject.SetActive(countdown);
 
-        _roomCode.SetActive(entrance && launcher != null);
-        if (launcher != null && launcher.RoomCode != _shownCode)
+        if (countdown)
         {
-            _shownCode = launcher.RoomCode;
-            _roomCodeText.text = $"방 코드  <b><color=#F2C34E>{launcher.RoomCode}</color></b>";
-        }
-    }
-
-    private static int CountCleared()
-    {
-        // 방 상태가 바뀐 즉시 반영되도록 방을 직접 센다(세션 값은 다음 Tick에 갱신).
-        int cleared = 0;
-        foreach (NCCombatRoom room in NCCombatRoom.All)
-        {
-            if (room.Object != null && room.Object.IsValid && room.State == NCRoomState.Cleared)
+            int number = Mathf.Max(1, Mathf.CeilToInt(session.CountdownSeconds));
+            if (number != _shownCountdown)
             {
-                cleared++;
+                _shownCountdown = number;
+                _countdown.text = number.ToString();
+                NCUi.PlaySound(NCSound.Tick);
             }
         }
+        else
+        {
+            _shownCountdown = -1;
+        }
 
-        return cleared;
-    }
-
-    private void TickEntrance(NCSession session, bool entrance)
-    {
-        _entryGuide.SetActive(entrance);
-        _controls.SetActive(entrance);
-
-        if (entrance == false || _entryStatus == null) // 이동 안내 문구가 프리팹에 없으면 건너뜀
+        if (ready == false)
         {
             return;
         }
 
-        int required = NCBalance.Get.RequiredPlayers;
-        int key = session.PlayerCount * 100 + session.PlayersInZone * 10 + required;
-        if (key == _shownEntryKey)
+        _dominanceA.Show(session.DominancePercent(0), session.Dominance[0] / NCSession.WinDominance);
+        _dominanceB.Show(session.DominancePercent(1), session.Dominance[1] / NCSession.WinDominance);
+
+        int zone = (int)session.Zone;
+        if (zone != _shownZone)
         {
-            return;
-        }
+            bool first = _shownZone < 0;
+            _shownZone = zone;
+            _zoneText.text = ZoneLabel(session.Zone);
+            _zoneText.color = NCSession.ZoneColor(session.Zone);
 
-        _shownEntryKey = key;
-        _entryStatus.text = session.PlayerCount < required
-            ? $"동료의 접속을 기다리는 중...  ({session.PlayerCount}/{required})"
-            : $"동료와 중앙홀의 빛나는 원으로 이동하세요  ({session.PlayersInZone}/{session.PlayerCount})";
-    }
-
-    private void TickHealth(NCPlayer me)
-    {
-        // [UI 프리팹 방식] 패널 번호 고정 — _mine = 1P 패널, _mate = 2P 패널 (이름은 기존 유지)
-        _mine.Show(NCPlayer.FindBySlot(0));
-        _mate.Show(NCPlayer.FindBySlot(1));
-    }
-
-    private void TickAmmo(NCPlayer me)
-    {
-        if (me == null || me.Gun == null || me.Object == null || me.Object.IsValid == false)
-        {
-            return;
-        }
-
-        NCGun gun = me.Gun;
-        bool reloading = gun.IsReloading;
-
-        int ammoKey = gun.IsOvercharged ? -100 : gun.Ammo;
-        if (ammoKey != _shownAmmo)
-        {
-            _shownAmmo = ammoKey;
-            // [UI 프리팹 방식] 현재 탄약과 '/12'가 다른 글자로 나뉘어 있다. 과충전 중엔 '/12'를 숨긴다.
-            _ammoText.text = gun.IsOvercharged ? "무소모" : gun.Ammo.ToString();
-            if (_ammoMaxText != null)
+            if (first == false && session.IsPlaying)
             {
-                _ammoMaxText.text = $"/{gun.MagazineSize}";
-                _ammoMaxText.gameObject.SetActive(gun.IsOvercharged == false);
+                NCUi.PlaySound(NCSound.Tick);
             }
-            _ammoText.color = gun.IsOvercharged ? NCStyle.P1 : (gun.Ammo == 0 ? NCStyle.Danger : NCStyle.Text);
         }
-
-        int state = reloading ? 1 : (gun.Ammo == 0 && gun.IsOvercharged == false ? 2 : 0);
-        if (state != _shownAmmoState)
-        {
-            _shownAmmoState = state;
-            _ammoHint.text = state == 1 ? "재장전 중..." : (state == 2 ? "재장전 필요!" : "재장전");
-        }
-
-        _ammoHint.color = state == 1
-            ? NCStyle.Text
-            : (state == 2 ? Color.Lerp(NCStyle.Danger, NCStyle.Text, Mathf.PingPong(Time.time * 3f, 1f)) : NCStyle.TextDim);
-
-        _reloadBack.gameObject.SetActive(reloading);
-        NCUiKit.SetBar(_reloadFill, gun.ReloadRatio);
     }
 
-    // ───────── E 안내: 실행 가능한 대상 하나만(구조 → 정리) ─────────
-
-    private void TickPrompt(NCPlayer me, bool playing)
+    private static string ZoneLabel(NCZoneState zone)
     {
-        bool shown = false;
-
-        if (me != null && me.Object != null && me.Object.IsValid && me.Health.IsDown == false)
+        switch (zone)
         {
-            shown = TryRevivePrompt(me) || TryDummyPrompt(me) || TrySupplyPrompt(me);
+            case NCZoneState.SlotA: return "1P 점령 중";
+            case NCZoneState.SlotB: return "2P 점령 중";
+            case NCZoneState.Contested: return "대치 중";
+            default: return "중립";
         }
-
-        _prompt.gameObject.SetActive(shown);
     }
 
-    private bool TryRevivePrompt(NCPlayer me)
+    private void TickCharge(NCGun gun)
     {
-        float range = NCBalance.Get.reviveRange;
+        bool active = gun.IsOvercharged;
+        int state = active ? 2 : (gun.Charges > 0 ? 1 : 0);
 
-        foreach (NCPlayer other in NCPlayer.All)
+        if (state != _shownChargeState)
         {
-            if (other == me || other.Health.IsDown == false)
+            _shownChargeState = state;
+            _shownChargeTenths = -1;
+            _chargeText.text = state == 1 ? "사용 가능" : "충전 없음";
+            _chargeText.color = state == 0 ? NCStyle.TextDim : NCStyle.ShotOvercharge;
+            _chargeIcon.color = state == 0 ? new Color(1f, 1f, 1f, 0.3f) : (state == 1 ? Color.white : NCStyle.ShotOvercharge);
+        }
+
+        if (active)
+        {
+            int tenths = Mathf.CeilToInt(gun.OverchargeRemaining * 10f);
+            if (tenths != _shownChargeTenths)
+            {
+                _shownChargeTenths = tenths;
+                _chargeText.text = $"{tenths / 10f:0.0}초";
+            }
+        }
+
+        _chargeBar.gameObject.SetActive(active);
+        NCUiKit.SetBar(_chargeFill, gun.OverchargeRatio);
+    }
+
+    private void DetectEvents(NCSession session, bool playing)
+    {
+        if (playing && _wasPlaying == false)
+        {
+            ShowMessage("중앙을 점령하세요!", NCStyle.Brass);
+        }
+
+        foreach (NCGhostCamp camp in NCGhostCamp.All)
+        {
+            if (camp.Object == null || camp.Object.IsValid == false)
             {
                 continue;
             }
 
-            if (NCMath.FlatDistance(other.transform.position, me.transform.position) > range + 0.3f)
+            int rewards = camp.RewardCount;
+            if (playing && _seenRewards.TryGetValue(camp, out int seen) && rewards > seen)
             {
-                continue;
+                string who = camp.RewardSlot == 0 ? "1P" : "2P";
+                bool mine = NCPlayer.Local != null && NCPlayer.Local.Slot == camp.RewardSlot;
+                ShowMessage(mine ? "과충전 획득 · Q로 사용" : $"{who} 과충전 획득", NCStyle.ShotOvercharge);
+                NCUi.PlaySound(NCSound.Reward);
             }
 
-            bool reviving = other.Health.Rescuer == me.Object.InputAuthority && other.Health.ReviveProgress > 0f;
-            ShowPrompt(other.transform.position + Vector3.up * 2.8f,
-                reviving ? "구조 중... 움직이지 마세요" : "길게 눌러 동료 구조",
-                reviving ? other.Health.ReviveRatio : 0f, NCStyle.Success, chips: false, mask: 0);
-            return true;
+            _seenRewards[camp] = rewards;
+
+            bool active = camp.IsActive;
+            if (playing && _wasPlaying && active && _seenActive.TryGetValue(camp, out bool was) && was == false)
+            {
+                ShowMessage($"유령 등장 · {GhostLabel(camp.Type)}", NCStyle.GhostTelegraph);
+            }
+
+            _seenActive[camp] = active;
         }
 
-        return false;
+        _wasPlaying = playing;
     }
 
-    private bool TryDummyPrompt(NCPlayer me)
+    public static string GhostLabel(NCGhostType type)
     {
-        float range = NCBalance.Get.dummyRange;
-
-        foreach (NCCombatRoom room in NCCombatRoom.All)
+        switch (type)
         {
-            if (room.Object == null || room.Object.IsValid == false)
-            {
-                continue;
-            }
-
-            bool hasDummy = room.State == NCRoomState.Untouched || room.State == NCRoomState.Clearing;
-            if (hasDummy == false || NCMath.FlatDistance(room.DummyPosition, me.transform.position) > range + 0.5f)
-            {
-                continue;
-            }
-
-            string text;
-            bool mineHeld = (room.HoldingMask & (1 << me.Slot)) != 0;
-
-            switch (room.Block)
-            {
-                case NCRoomBlock.NotStarted:
-                    text = "중앙홀에서 의뢰를 먼저 시작하세요";
-                    break;
-                case NCRoomBlock.OtherRoom:
-                    text = "다른 방의 전투가 끝나야 합니다";
-                    break;
-                case NCRoomBlock.DoorOccupied:
-                    text = "출입구에서 떨어져 주세요";
-                    break;
-                default:
-                    if (room.ClearProgress > 0f)
-                    {
-                        text = "정리 중...";
-                    }
-                    else if (mineHeld)
-                    {
-                        text = "동료와 함께 E를 누르세요";
-                    }
-                    else
-                    {
-                        text = "길게 눌러 함께 치우기";
-                    }
-                    break;
-            }
-
-            bool solo = NCBalance.Get.RequiredPlayers == 1;
-            ShowPrompt(room.DummyPosition + Vector3.up * 1.8f, text, room.ClearRatio, NCStyle.P1, chips: solo == false, mask: room.HoldingMask);
-            return true;
-        }
-
-        return false;
-    }
-
-    private bool TrySupplyPrompt(NCPlayer me)
-    {
-        foreach (NCSupplyBox box in NCSupplyBox.All)
-        {
-            if (box.Object == null || box.Object.IsValid == false || NCMath.FlatDistance(box.transform.position, me.transform.position) > NCBalance.Get.supplyRange + 0.5f)
-            {
-                continue;
-            }
-
-            string text;
-            switch (box.State)
-            {
-                case NCSupplyState.Locked:
-                    text = $"잠김 · {box.UnlockText} 소탕 후 사용";
-                    break;
-                case NCSupplyState.Used:
-                    text = "사용 완료";
-                    break;
-                default:
-                    text = NCSupplyBox.IsBlockedByCombat() ? "전투 중에는 사용할 수 없습니다" : "보급 사용 · 두 명 체력 +30";
-                    break;
-            }
-
-            ShowPrompt(box.transform.position + Vector3.up * 1.6f, text, 0f, NCStyle.P2, chips: false, mask: 0);
-            return true;
-        }
-
-        return false;
-    }
-
-    private void ShowPrompt(Vector3 world, string text, float ratio, Color barColor, bool chips, int mask)
-    {
-        Camera cam = Camera.main;
-        if (cam == null)
-        {
-            return;
-        }
-
-        Vector3 screen = cam.WorldToScreenPoint(world);
-        if (screen.z < 0f)
-        {
-            return;
-        }
-
-        RectTransformUtility.ScreenPointToLocalPointInRectangle(_canvas, screen, null, out Vector2 local);
-
-        // 안전 영역 안으로 제한
-        Vector2 half = _canvas.rect.size * 0.5f;
-        local.x = Mathf.Clamp(local.x, -half.x + 200f, half.x - 200f);
-        local.y = Mathf.Clamp(local.y, -half.y + 160f, half.y - 260f);
-        _prompt.anchoredPosition = local;
-
-        _promptText.text = text;
-        _promptChips.SetActive(chips);
-        _chip1.color = (mask & 1) != 0 ? NCStyle.P1 : NCStyle.Hex("58B8EA", 0.25f);
-        _chip2.color = (mask & 2) != 0 ? NCStyle.P2 : NCStyle.Hex("F2C34E", 0.25f);
-        _promptFill.color = barColor;
-        NCUiKit.SetBar(_promptFill, ratio);
-        _promptBar.gameObject.SetActive(ratio > 0f || chips);
-    }
-
-    private void TickDown(NCPlayer me)
-    {
-        bool down = me != null && me.Object != null && me.Object.IsValid && me.Health.IsDown;
-        _downPanel.SetActive(down);
-        _downVignette.enabled = down;
-
-        if (down)
-        {
-            float ratio = me.Health.ReviveRatio;
-            _downText.text = ratio > 0f ? "동료가 구조하는 중..." : "다운 · 동료의 구조를 기다리세요";
-            NCUiKit.SetBar(_downFill, ratio);
-            _downVignette.color = new Color(0.6f, 0.05f, 0.1f, 0.18f + 0.06f * Mathf.Sin(Time.time * 3f));
+            case NCGhostType.Fast: return "빠른 유령";
+            case NCGhostType.Tank: return "탱커 유령";
+            default: return "기본 유령";
         }
     }
 
-    // ───────── 알림(MSG) ─────────
-
-    private void DetectEvents(NCSession session, NCPlayer me, bool playing)
+    private void ShowMessage(string text, Color accent)
     {
-        // 방마다 이전 상태를 기억해, 어느 방이든 상태가 바뀌는 순간 알린다.
-        foreach (NCCombatRoom room in NCCombatRoom.All)
-        {
-            if (room.Object == null || room.Object.IsValid == false)
-            {
-                continue;
-            }
-
-            NCRoomState state = room.State;
-            if (_lastRoomStates.TryGetValue(room, out NCRoomState last) == false)
-            {
-                _lastRoomStates[room] = state;
-                continue;
-            }
-
-            if (state == last)
-            {
-                continue;
-            }
-
-            if (state == NCRoomState.Warning)
-            {
-                // 차수는 예고 1.5초 동안만 알린다.
-                ShowMessage($"유령 출현 · {room.WaveIndex + 1}차", NCBalance.Get.spawnWarningSeconds, 2, NCStyle.GhostTelegraph);
-            }
-            else if (state == NCRoomState.Cleared && playing)
-            {
-                int total = Mathf.Max(1, NCCombatRoom.All.Count);
-                ShowMessage($"◆ {room.RoomName} 소탕 완료 ({CountCleared()}/{total}) ◆", NCBalance.Get.messageSeconds, 1, NCStyle.Success);
-            }
-
-            _lastRoomStates[room] = state;
-        }
-
-        NCPlayer mate = null;
-        int reviveTotal = 0;
-        foreach (NCPlayer player in NCPlayer.All)
-        {
-            reviveTotal += player.Health.ReviveCount;
-            if (player != me)
-            {
-                mate = player;
-            }
-        }
-
-        bool mateDown = mate != null && mate.Health.IsDown;
-        if (mateDown && _lastMateDown == false)
-        {
-            ShowMessage("동료가 다운되었습니다 · 구조하세요", NCBalance.Get.messageSeconds, 3, NCStyle.Danger);
-        }
-
-        if (reviveTotal > _lastReviveTotal)
-        {
-            ShowMessage("구조 성공!", NCBalance.Get.messageSeconds, 3, NCStyle.Success);
-        }
-
-        _lastMateDown = mateDown;
-        _lastReviveTotal = reviveTotal;
-
-        // 과충전 지급(소탕 알림과 겹치지 않도록 조금 늦게 덮어쓴다 — 같은 우선순위)
-        int charges = me != null && me.Object != null && me.Object.IsValid ? me.Gun.Charges : 0;
-        if (charges > _lastCharges)
-        {
-            ShowMessage("과충전 충전됨 · Q로 사용", NCBalance.Get.messageSeconds, 1, NCStyle.P1);
-        }
-
-        _lastCharges = charges;
-
-        // 보급 해금·사용
-        int uses = 0;
-        foreach (NCSupplyBox box in NCSupplyBox.All)
-        {
-            if (box.Object == null || box.Object.IsValid == false)
-            {
-                continue;
-            }
-
-            uses += box.UseCount;
-            NCSupplyState state = box.State;
-
-            if (_lastSupplyStates.TryGetValue(box, out NCSupplyState last) && last == NCSupplyState.Locked && state == NCSupplyState.Available)
-            {
-                ShowMessage($"보급 해금 · {box.BoxName}", NCBalance.Get.messageSeconds, 0, NCStyle.P2);
-            }
-
-            _lastSupplyStates[box] = state;
-        }
-
-        if (uses > _lastSupplyUses)
-        {
-            ShowMessage("보급 사용 · 두 명 체력 +30", NCBalance.Get.messageSeconds, 3, NCStyle.Success);
-        }
-
-        _lastSupplyUses = uses;
-    }
-
-    /// <summary>우선순위가 같거나 높을 때만 바꾼다. 늦게 큐에서 재생하지 않는다.</summary>
-    private void ShowMessage(string text, float seconds, int priority, Color accent)
-    {
-        bool active = Time.time < _messageUntil;
-        if (active && priority < _messagePriority)
-        {
-            return;
-        }
-
         _messageText.text = text;
         _messageAccent.color = accent;
-        _messageUntil = Time.time + seconds;
-        _messagePriority = priority;
+        _messageUntil = Time.time + NCBalance.Get.messageSeconds;
     }
 
-    private void TickMessage()
+    // ───────── 지배율 ─────────
+
+    private class DominancePanel
     {
-        float target = Time.time < _messageUntil ? 1f : 0f;
-        _message.alpha = Mathf.MoveTowards(_message.alpha, target, Time.deltaTime * 6f);
+        private readonly TextMeshProUGUI _text;
+        private readonly Image _fill;
+        private readonly string _name;
+        private int _shown = -1;
 
-        // 입구 안내와 같은 자리를 쓰므로 안내가 있으면 숨긴다.
-        _message.gameObject.SetActive(_entryGuide.activeSelf == false);
-    }
-
-    // ───────── 체력 패널 ─────────
-
-    private class HealthPanel
-    {
-        // [UI 프리팹 방식] 패널 모양·번호(1P/2P)·바 색은 아트 프리팹 그대로 쓰고, 값만 바꾼다.
-        private readonly GameObject _root;
-        private readonly TextMeshProUGUI _value;  // HP_text
-        private readonly RectTransform _fill;     // HP_Fill — 왼쪽 기준이라 너비로 체력 비율을 나타낸다
-        private readonly Image _fillImage;
-        private readonly float _fullWidth;        // 체력 100%일 때 바 너비(프리팹 값)
-        private readonly Color _baseColor;        // 아트가 정한 바 색(1P 파랑 / 2P 노랑)
-        private int _shownHp = -1;
-        private int _shownMax = -1;
-        private int _shownDown = -1;
-
-        public HealthPanel(NCEntryHealthView view)
+        public DominancePanel(RectTransform root, int slot)
         {
-            _root = view.Panel;
-            _value = view.HpText;
-            _fillImage = view.HpFill;
-            if (_fillImage != null)
-            {
-                _fill = _fillImage.rectTransform;
-                _fullWidth = _fill.sizeDelta.x;
-                _baseColor = _fillImage.color;
-            }
+            _name = slot == 0 ? "1P" : "2P";
+            RectTransform panel = NCUiKit.NewPanel("Dominance" + _name, root, deep: true);
+            NCUiKit.Place(panel, new Vector2(0.5f, 1f), new Vector2(slot == 0 ? -264f : 264f, -32f), new Vector2(186f, 76f));
+            panel.Find("Frame").GetComponent<Image>().color = NCStyle.SlotColor(slot);
+
+            _text = NCUiKit.NewText("Text", panel, "", 30f, NCStyle.SlotColor(slot), style: FontStyles.Bold);
+            NCUiKit.Place(_text.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -6f), new Vector2(176f, 38f));
+            _fill = NCUiKit.NewBar("Bar", panel, NCStyle.SlotColor(slot), out RectTransform bar);
+            NCUiKit.Place(bar, new Vector2(0.5f, 0f), new Vector2(0f, 10f), new Vector2(162f, 18f));
         }
 
-        public void Show(NCPlayer player)
+        public void Show(int percent, float ratio)
         {
-            if (_root == null) return;
-
-            bool valid = player != null && player.Object != null && player.Object.IsValid;
-            _root.SetActive(valid);
-
-            if (valid == false)
+            if (percent != _shown)
             {
-                return;
+                _shown = percent;
+                _text.text = $"{_name}  {percent}%";
             }
 
-            NCHealth health = player.Health;
-            int down = health.IsDown ? 1 : 0;
-
-            // 다운은 색만이 아니라 글자로도 표시한다(규칙: 색만으로 상태 구분 금지)
-            if (_value != null && (health.Hp != _shownHp || health.MaxHp != _shownMax || down != _shownDown))
-            {
-                _shownHp = health.Hp;
-                _shownMax = health.MaxHp;
-                _shownDown = down;
-                _value.text = health.IsDown ? "다운" : $"{health.Hp} / {health.MaxHp}";
-                _value.color = health.IsDown ? NCStyle.Danger : NCStyle.Text;
-            }
-
-            if (_fill != null)
-            {
-                float ratio = Mathf.Clamp01(health.Ratio);
-                _fill.sizeDelta = new Vector2(_fullWidth * ratio, _fill.sizeDelta.y);
-                _fillImage.enabled = ratio > 0.001f;
-                _fillImage.color = ratio <= 0.3f ? NCStyle.Danger : _baseColor;
-            }
+            NCUiKit.SetBar(_fill, ratio);
         }
     }
 }

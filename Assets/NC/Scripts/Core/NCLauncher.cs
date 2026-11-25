@@ -124,11 +124,7 @@ public class NCLauncher : MonoBehaviour
 
         NetworkEvents events = gameObject.AddComponent<NetworkEvents>();
 
-        // 코드로 붙인 컴포넌트는 Inspector 직렬화를 거치지 않아 이벤트 필드가 비어(null) 있다 → 직접 만든다.
-        events.OnInput ??= new NetworkEvents.InputEvent();
-        events.PlayerJoined ??= new NetworkEvents.PlayerEvent();
-        events.PlayerLeft ??= new NetworkEvents.PlayerEvent();
-        events.OnShutdown ??= new NetworkEvents.ShutdownEvent();
+        EnsureEvents(events);
 
         events.OnInput.AddListener(OnInput);
         events.PlayerJoined.AddListener(OnPlayerJoined);
@@ -171,6 +167,33 @@ public class NCLauncher : MonoBehaviour
         ResetToIdle(message);
     }
 
+    /// <summary>
+    /// 코드로 붙인 NetworkEvents는 Inspector 직렬화를 거치지 않아 이벤트가 null이다.
+    /// 쓰지 않는 이벤트도 Fusion이 호출하므로 전부 만들어 둔다.
+    /// </summary>
+    private static void EnsureEvents(NetworkEvents events)
+    {
+        events.OnInput ??= new NetworkEvents.InputEvent();
+        events.OnInputMissing ??= new NetworkEvents.InputPlayerEvent();
+        events.OnConnectedToServer ??= new NetworkEvents.RunnerEvent();
+        events.OnDisconnectedFromServer ??= new NetworkEvents.DisconnectFromServerEvent();
+        events.OnConnectRequest ??= new NetworkEvents.ConnectRequestEvent();
+        events.OnConnectFailed ??= new NetworkEvents.ConnectFailedEvent();
+        events.PlayerJoined ??= new NetworkEvents.PlayerEvent();
+        events.PlayerLeft ??= new NetworkEvents.PlayerEvent();
+        events.OnSimulationMessage ??= new NetworkEvents.SimulationMessageEvent();
+        events.OnShutdown ??= new NetworkEvents.ShutdownEvent();
+        events.OnSessionListUpdate ??= new NetworkEvents.SessionListUpdateEvent();
+        events.OnCustomAuthenticationResponse ??= new NetworkEvents.CustomAuthenticationResponse();
+        events.OnHostMigration ??= new NetworkEvents.HostMigrationEvent();
+        events.OnSceneLoadDone ??= new NetworkEvents.RunnerEvent();
+        events.OnSceneLoadStart ??= new NetworkEvents.RunnerEvent();
+        events.OnReliableData ??= new NetworkEvents.ReliableDataEvent();
+        events.OnReliableProgress ??= new NetworkEvents.ReliableProgressEvent();
+        events.OnObjectEnterAOI ??= new NetworkEvents.ObjectPlayerEvent();
+        events.OnObjectExitAOI ??= new NetworkEvents.ObjectPlayerEvent();
+    }
+
     private void OnShutdown(NetworkRunner runner, ShutdownReason reason)
     {
         // 세션 안에서 끊긴 경우: 씬을 다시 불러 처음 상태로 돌린다(접속 화면).
@@ -181,7 +204,7 @@ public class NCLauncher : MonoBehaviour
         {
             NCLauncherNotice.Pending = reason == ShutdownReason.Ok
                 ? ""
-                : "연결이 종료되어 의뢰를 중단합니다.";
+                : "연결이 종료되어 경기를 중단합니다.";
             SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
             return;
         }
@@ -295,7 +318,6 @@ public class NCLauncher : MonoBehaviour
         NCInput data = new NCInput();
 
         // 메뉴·팝업이 열려 있으면 내 게임 입력만 막는다(시간과 동료는 계속 진행).
-        // 빈 입력을 보내므로 Host 쪽에서 E 유지가 풀려 진행 중이던 정리·구조가 취소된다.
         if (NCUi.InputBlocked)
         {
             data.AimPoint = _lastAim;
@@ -316,8 +338,8 @@ public class NCLauncher : MonoBehaviour
             data.Move = Vector2.ClampMagnitude(move, 1f);
 
             data.Buttons.Set(NCButton.Reload, keyboard.rKey.isPressed);
-            data.Buttons.Set(NCButton.Interact, keyboard.eKey.isPressed);
             data.Buttons.Set(NCButton.Overcharge, keyboard.qKey.isPressed);
+            data.Buttons.Set(NCButton.Dash, keyboard.spaceKey.isPressed);
         }
 
         if (mouse != null)

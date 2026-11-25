@@ -69,7 +69,7 @@ public class NCMenuScreen
 
     private void AskLeave()
     {
-        _confirm.Show("나가면 두 명의 의뢰가 종료됩니다.\n나가시겠습니까?", "나가기", () =>
+        _confirm.Show("나가면 현재 경기를 포기합니다.\n나가시겠습니까?", "나가기", () =>
         {
             Close();
             NCLauncher.Instance?.Leave();
