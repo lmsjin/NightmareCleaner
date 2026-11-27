@@ -1,5 +1,13 @@
 using UnityEngine;
 
+/// <summary>솔로 테스트 허수아비의 행동.</summary>
+public enum NCDummyMode
+{
+    Stand,     // 2P 스폰에 가만히 서 있는다
+    Zone,      // 점령지로 걸어가 그 안에서 좌우로 왕복한다
+    ZoneShoot, // Zone + 1P가 보이고 사거리 안이면 쏜다
+}
+
 /// <summary>
 /// Mansion Clash 수치(통합 기획서 1.0의 5·6장). 거리 단위는 1유닛.
 /// 에셋: Assets/NC/Resources/NCBalance.asset
@@ -8,8 +16,14 @@ using UnityEngine;
 public class NCBalance : ScriptableObject
 {
     [Header("테스트")]
-    [Tooltip("켜면 혼자서도 시작할 수 있다. 2인 플레이 때는 반드시 끈다")]
+    [Tooltip("켜면 2P 자리에 허수아비 상대가 생겨 혼자 PvP를 시험할 수 있다. 대기실에 사람이 들어오면 허수아비가 자리를 넘긴다")]
     public bool soloTest = false;
+    [Tooltip("허수아비 행동: 가만히 / 점령지 왕복 / 점령지 왕복 + 사격")]
+    public NCDummyMode soloDummy = NCDummyMode.ZoneShoot;
+    [Tooltip("허수아비 조준 오차(유닛). 0이면 정확히 맞힌다")]
+    public float dummyAimJitter = 0.6f;
+    [Tooltip("허수아비가 점령지에서 한쪽으로 움직이는 시간(초)")]
+    public float dummyStrafeSeconds = 1.2f;
 
     [Header("경기")]
     public float countdownSeconds = 3f;
@@ -30,6 +44,8 @@ public class NCBalance : ScriptableObject
     public float regenPerSecond = 10f;
     public float respawnSeconds = 5f;
     public float protectSeconds = 3f;
+    [Tooltip("쓰러진 뒤 카메라가 상대를 따라가기(관전) 시작할 때까지(초)")]
+    public float spectateDelaySeconds = 1f;
 
     [Header("사격 (투사체)")]
     public int shotDamage = 20;
@@ -44,7 +60,7 @@ public class NCBalance : ScriptableObject
     public float overchargeSeconds = 8f;
     public float overchargeFireInterval = 0.2f;
 
-    [Header("대쉬 (Space) — 무적 없음, 대쉬 중 사격 불가")]
+    [Header("대쉬 (마우스 우클릭) — 무적 없음, 대쉬 중 사격 불가")]
     public float dashDistance = 4f;
     public float dashSeconds = 0.2f;
     [Tooltip("사용한 순간부터 다시 쓸 수 있을 때까지")]

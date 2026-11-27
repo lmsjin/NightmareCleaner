@@ -63,8 +63,8 @@ public class NCLobbyScreen
         _ready = view.ReadyButton;
         _readyLabel = view.ReadyLabel;
         _start = view.StartButton;
-        _cards[0] = new SlotCard(view.Slot1P, view.ReadySprite, view.NotReadySprite);
-        _cards[1] = new SlotCard(view.Slot2P, view.ReadySprite, view.NotReadySprite);
+        _cards[0] = new SlotCard(0, view.Slot1P, view.ReadySprite, view.NotReadySprite);
+        _cards[1] = new SlotCard(1, view.Slot2P, view.ReadySprite, view.NotReadySprite);
         // 아직 프리팹에 없는 요소 — null이면 Tick에서 건너뛴다
         // _copied("코드를 복사했습니다"), _waitHost("호스트가 시작합니다"), _leftBanner("동료가 나갔습니다")
 
@@ -82,6 +82,12 @@ public class NCLobbyScreen
         if (_root.activeSelf != visible)
         {
             _root.SetActive(visible);
+        }
+
+        // 캐릭터 미리보기 카메라는 대기실이 보일 때만 돈다.
+        foreach (SlotCard card in _cards)
+        {
+            card?.SetPreviewActive(visible);
         }
     }
 
@@ -180,21 +186,38 @@ public class NCLobbyScreen
         private readonly Image _stateIcon;       // readystatus/icon — 준비 완료=체크, 준비 중=엑스, 참가 대기=숨김
         private readonly Sprite _readySprite;
         private readonly Sprite _notReadySprite;
+        private readonly GameObject _readyFrame;  // 준비 완료면 카드 둘레에 녹색 테두리(아트 바탕이 어두워 색 섞기로는 티가 안 남)
+        private readonly NCLobbyPreview _preview; // 카드 가운데 캐릭터
         private int _shownState = -1;
         // "나" 표시(_me)는 아직 프리팹에 없어 생략 — 추가하면 여기서 다시 연결
 
-        public SlotCard(NCLobbySlotView view, Sprite readySprite, Sprite notReadySprite)
+        public SlotCard(int slot, NCLobbySlotView view, Sprite readySprite, Sprite notReadySprite)
         {
             _state = view.StateText;
             _stateIcon = view.StateIcon;
             _readySprite = readySprite;
             _notReadySprite = notReadySprite;
+            if (view.Panel != null)
+            {
+                RectTransform card = view.Panel.rectTransform;
+                _preview = new NCLobbyPreview(slot, card, view.Character != null ? view.Character.transform : null);
+
+                Image frame = NCUiKit.NewImage("ReadyFrame", card, NCUiKit.FrameSprite, NCStyle.Success);
+                frame.pixelsPerUnitMultiplier = 0.4f; // 공용 테두리(2px)를 굵게
+                NCUiKit.Stretch(frame.rectTransform, -3f);
+                _readyFrame = frame.gameObject;
+                _readyFrame.SetActive(false);
+            }
         }
+
+        public void SetPreviewActive(bool active) => _preview?.SetActive(active);
 
         public void Show(NCPlayer player, NCPlayer me)
         {
             bool joined = player != null && player.Object != null && player.Object.IsValid;
             int state = joined == false ? 0 : (player.Ready ? 2 : 1);
+
+            _preview?.Tick(state); // 회전·점프·빛은 매 프레임
 
             if (state == _shownState)
             {
@@ -202,6 +225,11 @@ public class NCLobbyScreen
             }
 
             _shownState = state;
+
+            if (_readyFrame != null)
+            {
+                _readyFrame.SetActive(state == 2);
+            }
 
             if (_stateIcon != null)
             {

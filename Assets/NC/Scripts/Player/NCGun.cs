@@ -90,7 +90,7 @@ public class NCGun : NetworkBehaviour
             return;
         }
 
-        if (GetInput(out NCInput input) == false)
+        if (_player.TryGetInput(out NCInput input) == false)
         {
             return;
         }

@@ -14,6 +14,7 @@ public static class NCUiKit
     private static Sprite _round;
     private static Sprite _frame;
     private static Sprite _circle;
+    private static readonly System.Collections.Generic.Dictionary<int, Sprite> _rings = new System.Collections.Generic.Dictionary<int, Sprite>();
 
     /// <summary>둥근 모서리 채움(9-slice).</summary>
     public static Sprite RoundSprite => _round != null ? _round : (_round = MakeRounded(64, 16, 0));
@@ -23,6 +24,18 @@ public static class NCUiKit
 
     /// <summary>원(키캡·점).</summary>
     public static Sprite CircleSprite => _circle != null ? _circle : (_circle = MakeRounded(64, 32, 0));
+
+    /// <summary>원 테두리(조준점). border는 64px 기준 두께. 두께별로 한 번만 만든다. Image.Type은 Simple로 쓴다.</summary>
+    public static Sprite Ring(int border)
+    {
+        if (_rings.TryGetValue(border, out Sprite sprite) == false || sprite == null)
+        {
+            sprite = MakeRounded(64, 32, border);
+            _rings[border] = sprite;
+        }
+
+        return sprite;
+    }
 
     private static Sprite MakeRounded(int size, int radius, int border)
     {

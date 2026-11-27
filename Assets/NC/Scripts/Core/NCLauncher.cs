@@ -261,22 +261,74 @@ public class NCLauncher : MonoBehaviour
         }
 
         int slot = FindFreeSlot();
+
+        // 솔로 테스트 허수아비가 자리를 차지하고 있으면 대기실에서만 사람에게 넘긴다.
+        if (slot < 0)
+        {
+            slot = TryRemoveDummyForPlayer(runner);
+        }
+
         if (slot < 0)
         {
             runner.Disconnect(player);
             return;
         }
 
+        NetworkObject spawned = SpawnPlayer(runner, slot, player, dummy: false);
+        runner.SetPlayerObject(player, spawned);
+
+        SpawnDummyIfSolo(runner);
+    }
+
+    /// <summary>솔로 테스트이고 2P 자리가 비어 있으면 허수아비를 세운다. Host 전용.</summary>
+    private void SpawnDummyIfSolo(NetworkRunner runner)
+    {
+        if (NCBalance.Get.soloTest && NCPlayer.FindBySlot(1) == null)
+        {
+            SpawnPlayer(runner, 1, PlayerRef.None, dummy: true);
+            Debug.Log("[NCLauncher] 솔로 테스트: 2P 자리에 허수아비 생성");
+        }
+    }
+
+    private NetworkObject SpawnPlayer(NetworkRunner runner, int slot, PlayerRef owner, bool dummy)
+    {
         Transform point = entrySpawnPoints != null && slot < entrySpawnPoints.Length ? entrySpawnPoints[slot] : null;
         Vector3 position = point != null ? point.position : Vector3.up;
         Quaternion rotation = point != null ? point.rotation : Quaternion.identity;
 
         // 씬 연결이 비어 있으면 Resources에서 불러온다(빌더 재생성 중 연결이 깨져도 동작하도록).
         NetworkObject prefab = playerPrefab != null ? playerPrefab : Resources.Load<NetworkObject>("NC_Player");
-        NetworkObject spawned = runner.Spawn(prefab, position, rotation, player,
-            (r, obj) => obj.GetComponent<NCPlayer>().Slot = slot);
+        return runner.Spawn(prefab, position, rotation, owner, (r, obj) =>
+        {
+            NCPlayer spawned = obj.GetComponent<NCPlayer>();
+            spawned.Slot = slot;
+            spawned.IsDummy = dummy;
+            spawned.Ready = dummy;
+        });
+    }
 
-        runner.SetPlayerObject(player, spawned);
+    /// <summary>대기실이고 허수아비가 있으면 없애고 그 슬롯을 돌려준다. 없거나 경기 중이면 -1.</summary>
+    private static int TryRemoveDummyForPlayer(NetworkRunner runner)
+    {
+        NCSession session = NCSession.Instance;
+        if (session == null || session.Object == null || session.Phase != NCPhase.Lobby)
+        {
+            return -1;
+        }
+
+        foreach (NCPlayer existing in NCPlayer.All)
+        {
+            if (existing.IsDummy)
+            {
+                int slot = existing.Slot;
+                NCPlayer.All.Remove(existing); // Despawned가 늦게 불려도 슬롯이 바로 비게 한다(Remove는 중복 호출해도 안전)
+                runner.Despawn(existing.Object);
+                Debug.Log("[NCLauncher] 사람이 참가해 허수아비를 없앰");
+                return slot;
+            }
+        }
+
+        return -1;
     }
 
     private void OnPlayerLeft(NetworkRunner runner, PlayerRef player)
@@ -288,7 +340,20 @@ public class NCLauncher : MonoBehaviour
 
         if (runner.TryGetPlayerObject(player, out NetworkObject playerObject))
         {
+            NCPlayer leaving = playerObject.GetComponent<NCPlayer>();
+            if (leaving != null)
+            {
+                NCPlayer.All.Remove(leaving); // 아래에서 허수아비 자리를 바로 확인하기 위해
+            }
+
             runner.Despawn(playerObject);
+        }
+
+        // 대기실에서 사람이 나가면 솔로 테스트 허수아비를 다시 세운다.
+        NCSession session = NCSession.Instance;
+        if (session != null && session.Object != null && session.Phase == NCPhase.Lobby)
+        {
+            SpawnDummyIfSolo(runner);
         }
     }
 
@@ -339,30 +404,40 @@ public class NCLauncher : MonoBehaviour
 
             data.Buttons.Set(NCButton.Reload, keyboard.rKey.isPressed);
             data.Buttons.Set(NCButton.Overcharge, keyboard.qKey.isPressed);
-            data.Buttons.Set(NCButton.Dash, keyboard.spaceKey.isPressed);
         }
 
         if (mouse != null)
         {
             data.Buttons.Set(NCButton.Fire, mouse.leftButton.isPressed);
+            data.Buttons.Set(NCButton.Dash, mouse.rightButton.isPressed);
+        }
 
-            Camera cam = Camera.main;
-            if (cam != null)
+        data.AimPoint = ReadAimPoint();
+        input.Set(data);
+    }
+
+    /// <summary>
+    /// 마우스가 가리키는 조준점(내 캐릭터 발 높이 + 1m 평면, 총구 높이와 같게).
+    /// 광선이 평면과 만나지 않으면 마지막 값.
+    /// </summary>
+    public Vector3 ReadAimPoint()
+    {
+        Mouse mouse = Mouse.current;
+        Camera cam = Camera.main;
+
+        if (mouse != null && cam != null)
+        {
+            float height = NCPlayer.Local != null ? NCPlayer.Local.transform.position.y + 1f : 1f;
+            Plane plane = new Plane(Vector3.up, new Vector3(0f, height, 0f));
+            Ray ray = cam.ScreenPointToRay(mouse.position.ReadValue());
+
+            if (plane.Raycast(ray, out float distance))
             {
-                // 내 캐릭터 발 높이 + 1m 평면에 조준한다(총구 높이와 같게).
-                float height = NCPlayer.Local != null ? NCPlayer.Local.transform.position.y + 1f : 1f;
-                Plane plane = new Plane(Vector3.up, new Vector3(0f, height, 0f));
-                Ray ray = cam.ScreenPointToRay(mouse.position.ReadValue());
-
-                if (plane.Raycast(ray, out float distance))
-                {
-                    _lastAim = ray.GetPoint(distance);
-                }
+                _lastAim = ray.GetPoint(distance);
             }
         }
 
-        data.AimPoint = _lastAim;
-        input.Set(data);
+        return _lastAim;
     }
 }
 

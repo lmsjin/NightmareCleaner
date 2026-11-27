@@ -13,6 +13,9 @@ MonoBehaviour:
   m_Name: NCBalance
   m_EditorClassIdentifier: Assembly-CSharp::NCBalance
   soloTest: 0
+  soloDummy: 2
+  dummyAimJitter: 0.6
+  dummyStrafeSeconds: 1.2
   countdownSeconds: 3
   matchSeconds: 300
   dominancePerSecond: 1
@@ -25,6 +28,7 @@ MonoBehaviour:
   regenPerSecond: 10
   respawnSeconds: 5
   protectSeconds: 3
+  spectateDelaySeconds: 1
   shotDamage: 20
   fireInterval: 0.3
   magazineSize: 12

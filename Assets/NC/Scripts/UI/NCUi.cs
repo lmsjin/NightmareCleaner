@@ -62,11 +62,12 @@ public class NCUi : MonoBehaviour
         "0123456789:/.%()!?+~- " +
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz" +
         "·▲◆●" +
-        "가간게겠격결경계과근기까나남뉴는능니다단닫달대도돌동되됩두드득등라령로록료른를리립만메면모목못무방배보본부비빠사상서성세소속수쉬스습승시식실씬아악앙어없었에연예온완요용우유율은을음이인일임장재전점접제종주준중지진참찼초최충취치커코탈탱트패포하한할합해했행현형호확활회획횟후류률막망명처체타";
+        "가간게겠격결경계과근기까나남뉴는능니다단닫달대도돌동되됩두드득등라령로록료른를리립만메면모목못무방배보본부비빠사상서성세소속수쉬스습승시식실씬아악앙어없었에연예온완요용우유율은을음이인일임장재전점접제종주준중지진참찼초최충취치커코탈탱트패포하한할합해했행현형호확활회획횟후류률막망명처체타관조작키클릭";
 
     private void Awake()
     {
         _instance = this;
+        Cursor.visible = true; // 경기 중 씬을 다시 불렀을 때 조준점이 숨긴 OS 커서를 되돌린다
         _audio = gameObject.AddComponent<AudioSource>();
         _audio.playOnAwake = false;
         NCUiKit.Font = font;

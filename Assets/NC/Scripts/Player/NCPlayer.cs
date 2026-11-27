@@ -42,6 +42,9 @@ public class NCPlayer : NetworkBehaviour
     /// <summary>대기실 준비 상태(각자 요청, 호스트 확정).</summary>
     [Networked] public NetworkBool Ready { get; set; }
 
+    /// <summary>솔로 테스트 허수아비(조종하는 사람 없음, 입력은 Host가 NCDummyBrain으로 계산).</summary>
+    [Networked] public NetworkBool IsDummy { get; set; }
+
     [Networked] private TickTimer DashTimer { get; set; }
     [Networked] private TickTimer DashCooldown { get; set; }
     [Networked] private Vector3 DashDirection { get; set; }
@@ -113,10 +116,38 @@ public class NCPlayer : NetworkBehaviour
         }
     }
 
+    /// <summary>
+    /// 이번 Tick 입력. 사람이면 Fusion 입력, 허수아비면 Host가 계산한 입력.
+    /// 이동·대쉬(NCPlayer)와 사격(NCGun)이 같은 입력을 쓴다.
+    /// </summary>
+    public bool TryGetInput(out NCInput input)
+    {
+        if (GetInput(out input))
+        {
+            return true;
+        }
+
+        if (IsDummy && Object.HasStateAuthority)
+        {
+            input = NCDummyBrain.Compute(this);
+            return true;
+        }
+
+        return false;
+    }
+
     public override void FixedUpdateNetwork()
     {
         NCBalance balance = NCBalance.Get;
-        bool hasInput = GetInput(out NCInput input);
+
+        // 허수아비는 대기실에서 늘 준비 완료(경기 종료·초기화 때 꺼지므로 다시 켠다).
+        if (IsDummy && Object.HasStateAuthority && NCSession.Instance != null
+            && NCSession.Instance.Object != null && NCSession.Instance.Phase == NCPhase.Lobby)
+        {
+            Ready = true;
+        }
+
+        bool hasInput = TryGetInput(out NCInput input);
         bool canAct = CanAct;
 
         if (hasInput)
