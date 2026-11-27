@@ -96,6 +96,18 @@ PrefabInstance:
       propertyPath: m_Name
       value: UI_Lobby
       objectReference: {fileID: 0}
+    - target: {fileID: 7184798203476232739, guid: 839fe080017cb424881e1615a2adfc79, type: 3}
+      propertyPath: m_Sprite
+      value:
+      objectReference: {fileID: 21300000, guid: 532101414db4f2a4ea8ab4ad4173f7bc, type: 3}
+    - target: {fileID: 1631289230820664365, guid: 839fe080017cb424881e1615a2adfc79, type: 3}
+      propertyPath: m_Transition
+      value: 2
+      objectReference: {fileID: 0}
+    - target: {fileID: 1631289230820664365, guid: 839fe080017cb424881e1615a2adfc79, type: 3}
+      propertyPath: m_SpriteState.m_DisabledSprite
+      value:
+      objectReference: {fileID: 21300000, guid: edcac46844714df4082a26b3bb6512de, type: 3}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
